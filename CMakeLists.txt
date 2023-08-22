@@ -11,7 +11,7 @@ include_directories(C:/Users/xiuyuan.zhu/Lib/glfw-3.3.8.bin.WIN64/include)
 
 # Link directories for libraries
 link_directories(C:/VulkanSDK/1.3.250.1/Lib)
-link_directories(C:/Users/xiuyuan.zhu/Lib/glfw-3.3.8.bin.WIN64/lib-vc2022)
+link_directories(C:/Users/xiuyuan.zhu/Lib/glfw-3.3.8.bin.WIN64/lib-mingw-w64)
 
 # Link libraries
 link_libraries(vulkan-1)

@@ -7,9 +7,11 @@
 #include <glm/vec4.hpp>
 
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <vector>
 
@@ -18,6 +20,8 @@ const uint32_t HEIGHT = 600;
 
 const std::vector<const char *> validationLayers = {
     "VK_LAYER_KHRONOS_validation"};
+const std::vector<const char *> deviceExtensions = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
 #ifdef NDEBUG
 const bool enableValidationLayers = false;
@@ -27,7 +31,19 @@ const bool enableValidationLayers = true;
 
 struct QueueFamilyIndices {
 	std::optional<uint32_t> graphicsFamily;
-	bool isComplete() { return graphicsFamily.has_value(); }
+	std::optional<uint32_t> presentFamily;
+
+	bool isComplete() {
+		return graphicsFamily.has_value() && presentFamily.has_value();
+	}
+};
+struct SwapChainSupportDetails {
+	// 基本表面能力（交换链中图像的最小/最大数量，图像的最小/最大宽度和高度）
+	VkSurfaceCapabilitiesKHR capabilities;
+	// 表面格式（像素格式，颜色空间）
+	std::vector<VkSurfaceFormatKHR> formats;
+	// 可用的显示模式
+	std::vector<VkPresentModeKHR> presentModes;
 };
 
 VkResult CreateDebugUtilsMessengerEXT(
@@ -63,25 +79,54 @@ class HelloTriangleApplication {
 	}
 
   private:
+	// m_Window 是一个指向 GLFWwindow 对象的指针，它代表了程序创建的窗口。
 	GLFWwindow *m_Window;
+	// m_Instance 代表了程序的 Vulkan 实例。Vulkan 实例是 Vulkan
+	// 程序的基础，大部分 Vulkan 功能都需要它。
 	VkInstance m_Instance;
+	// m_ExtensionCount 用于存储程序所需的 Vulkan 扩展数量。
 	uint32_t m_ExtensionCount = 0;
+	// debugMessenger 是一个 Vulkan Debug Utils Messenger 对象，用于处理 Vulkan
+	// 的调试和错误消息。
 	VkDebugUtilsMessengerEXT debugMessenger;
+	// physicalDevice 是一个表示物理设备的对象，在这里我们初始化为
+	// VK_NULL_HANDLE。物理设备表示GPU设备，在 Vulkan
+	// 中，我们需要从所有可用的物理设备中选择一个进行操作。
+	VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+	// m_Device 是一个 Vulkan
+	// 设备（Device）对象，它代表了一个物理设备上的逻辑设备， 程序中所有的
+	// Vulkan 操作，如创建图像缓冲、提交命令等，都需要通过这个逻辑设备进行。
+	VkDevice m_Device;
+
+	// 这是一个handle，用来存储图形队列。
+	VkQueue graphicsQueue;
+
+	// 这是一个Vulkan表面对象，用于呈现渲染结果到窗口。
+	VkSurfaceKHR m_Surface;
+
+	// 这是一个handle，用来存储呈现队列。
+	VkQueue presentQueue;
 
 	void initWindow() {
+		// 初始化GLFW库
 		glfwInit();
-		// Because GLFW was originally designed to create an OpenGL context, we
-		// need to tell it to not create an OpenGL context
+
+		// 因为GLFW最初是设计来创建OpenGL上下文的，所以我们需要告诉它不要创建OpenGL上下文
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		// disable resized window for now
+
+		// 禁用窗口调整大小的功能
 		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+		// 创建一个新的GLFW窗口
 		m_Window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan", nullptr, nullptr);
 	}
 
 	void initVulkan() {
 		createInstance();
 		setupDebugMessenger();
+		createSurface();
 		pickPhysicalDevice();
+		createLogicalDevice();
 	}
 
 	void mainLoop() {
@@ -91,23 +136,27 @@ class HelloTriangleApplication {
 	}
 
 	void cleanUp() {
+		// Logical devices don't interact directly with instances, which is why
+		// it's not included as a parameter.
+		vkDestroyDevice(m_Device, nullptr);
 		if (enableValidationLayers) {
 			DestoryDebugUtilsMessengerEXT(m_Instance, debugMessenger, nullptr);
 		}
+		// Make sure that the surface is destroyed before the instance.
+		vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr);
 		vkDestroyInstance(m_Instance, nullptr);
 		glfwDestroyWindow(m_Window);
 		glfwTerminate();
 	}
 
 	void createInstance() {
+		// 检查是否启用了验证层，如果启用了但没有可用的验证层，则抛出运行时错误
 		if (enableValidationLayers && !checkValidationLayerSupport()) {
 			throw std::runtime_error(
-			    "validation layere requested, but not available!");
+			    "validation layer requested, but not available!");
 		}
 
-		// A lot of information in Vulkan is passed through structs instead of
-		// function parameters and we’ll have to fill in one more struct to
-		// provide sufficient information for creating an instance.
+		// 创建一个VkApplicationInfo结构体，填充我们的应用信息
 		VkApplicationInfo appInfo{};
 		appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
 		appInfo.pApplicationName = "Hello Triangle";
@@ -116,17 +165,18 @@ class HelloTriangleApplication {
 		appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
 		appInfo.apiVersion = VK_API_VERSION_1_0;
 
-		// tells the Vulkan driver which global extensions and validation layers
-		// we want to use.
+		// 创建一个VkInstanceCreateInfo结构体，该结构体将包含创建Vulkan实例所需的所有信息
 		VkInstanceCreateInfo createInfo{};
 		createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 		createInfo.pApplicationInfo = &appInfo;
 
+		// 获取并设置要启用的扩展列表
 		auto extensions = getRequiredExtensions();
 		createInfo.enabledExtensionCount =
 		    static_cast<uint32_t>(extensions.size());
 		createInfo.ppEnabledExtensionNames = extensions.data();
 
+		// 创建一个VkDebugUtilsMessengerCreateInfoEXT，用于存储调试信使的创建信息
 		VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo{};
 		if (enableValidationLayers) {
 			createInfo.enabledLayerCount =
@@ -138,24 +188,28 @@ class HelloTriangleApplication {
 			    (VkDebugUtilsMessengerCreateInfoEXT *)&debugCreateInfo;
 		} else {
 			createInfo.enabledLayerCount = 0;
-
 			createInfo.pNext = nullptr;
 		}
 
+		// 通过vkCreateInstance函数创建Vulkan实例，如果创建失败则抛出运行时错误
 		if (vkCreateInstance(&createInfo, nullptr, &m_Instance) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create instance!");
 		}
 	}
 
 	void checkExtensionSupport() {
-		// check for optional functionality
-		// To retrieve a list of supported extensions before creating an
-		// instance
+		// 检索支持的扩展列表的数量
 		vkEnumerateInstanceExtensionProperties(nullptr, &m_ExtensionCount,
 		                                       nullptr);
+
+		// 创建一个足够容纳所有扩展的向量
 		std::vector<VkExtensionProperties> extensions(m_ExtensionCount);
+
+		// 获取所有支持的扩展列表
 		vkEnumerateInstanceExtensionProperties(nullptr, &m_ExtensionCount,
 		                                       extensions.data());
+
+		// 打印可用的扩展
 		std::cout << "Available extensions:\n";
 		for (const auto &extension : extensions) {
 			std::cout << "\t" << extension.extensionName << std::endl;
@@ -163,20 +217,21 @@ class HelloTriangleApplication {
 	}
 
 	void pickPhysicalDevice() {
-		// This object will be implicitly destroyed when the VkInstance is
-		// destroyed, so we won't need to do anything new in the cleanup
-		// function.
-		VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+		// 查询系统中支持Vulkan的物理设备数量
 		uint32_t deviceCount = 0;
 		vkEnumeratePhysicalDevices(m_Instance, &deviceCount, nullptr);
 
+		// 如果没有任何支持Vulkan的物理设备，则抛出运行时错误
 		if (deviceCount == 0) {
 			throw std::runtime_error(
 			    "Failed to find GPUs with Vulkan support!");
 		}
 
+		// 创建一个足以容纳所有设备的向量，并获取设备列表
 		std::vector<VkPhysicalDevice> devices(deviceCount);
 		vkEnumeratePhysicalDevices(m_Instance, &deviceCount, devices.data());
+
+		// 遍历所有设备，找到第一个符合我们要求的设备
 		for (const auto &device : devices) {
 			if (isDeviceSuitable(device)) {
 				physicalDevice = device;
@@ -184,23 +239,10 @@ class HelloTriangleApplication {
 			}
 		}
 
+		// 如果没有找到符合要求的设备，则抛出运行时错误
 		if (physicalDevice == VK_NULL_HANDLE) {
 			throw std::runtime_error("Failed to find a suitable GPU!");
 		}
-
-		//    // Use an ordered map to automatically sort candidates by
-		//    increasing score std::multimap<int, VkPhysicalDevice> candidates;
-		//
-		//    for (const auto &device : devices) {
-		//      int score = rateDeviceSuitability(device);
-		//      candidates.insert(std::make_pair(score, device));
-		//    }
-		//
-		//    if (candidates.rbegin()->first > 0) {
-		//      physicalDevice = candidates.rbegin()->second;
-		//    } else {
-		//      throw std::runtime_error("Failed to find a suitable GPU!");
-		//    }
 	}
 
 	int rateDeviceSuitability(VkPhysicalDevice device) {
@@ -224,25 +266,31 @@ class HelloTriangleApplication {
 	}
 
 	bool isDeviceSuitable(VkPhysicalDevice device) {
-		//    VkPhysicalDeviceProperties deviceProperties;
-		//    VkPhysicalDeviceFeatures deviceFeatures;
-		//    vkGetPhysicalDeviceProperties(device, &deviceProperties);
-		//    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
-		//
-		//    return deviceProperties.deviceType ==
-		//               VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
-		//           deviceFeatures.geometryShader;
+		// 获取设备的队列家族信息
 		QueueFamilyIndices indices = findQueueFamilies(device);
-		return indices.isComplete();
+
+		bool extensionSupported = checkDeviceExtensionSupport(device);
+		bool swapChainAdequate = false;
+		if (extensionSupported) {
+			SwapChainSupportDetails swapChainSupportDetails =
+			    querySwapChainSupport(device);
+			swapChainAdequate = !swapChainSupportDetails.formats.empty() &&
+			                    !swapChainSupportDetails.presentModes.empty();
+		}
+		// 如果这个设备的所有队列家族都完整，那么我们认为这个设备是适合的
+		return indices.isComplete() && extensionSupported && swapChainAdequate;
 	}
 
 	void setupDebugMessenger() {
+		// 如果没有启用验证层，则直接返回
 		if (!enableValidationLayers)
 			return;
 
+		// 创建一个VkDebugUtilsMessengerCreateInfoEXT结构体，并填充创建调试信使所需的信息
 		VkDebugUtilsMessengerCreateInfoEXT createInfo;
 		populateDebugMessengerCreateInfo(createInfo);
 
+		// 使用CreateDebugUtilsMessengerEXT函数创建调试信使，如果创建失败则抛出运行时错误
 		if (CreateDebugUtilsMessengerEXT(m_Instance, &createInfo, nullptr,
 		                                 &debugMessenger) != VK_SUCCESS) {
 			throw std::runtime_error("failed to set up debug messenger!");
@@ -345,31 +393,164 @@ class HelloTriangleApplication {
 		createInfo.pfnUserCallback =
 		    debugCallback; // 设置用户自定义的回调函数，一旦满足上述条件，该回调函数就会被触发。
 	}
-
-	// Queue families
+	// Queue Family
 	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
-		// 该函数用于寻找支持图形命令的队列家族。
+		// 创建一个QueueFamilyIndices结构体，用于存储找到的队列家族索引
 		QueueFamilyIndices indices;
+
+		// 获取设备支持的队列家族数量
 		uint32_t queueFamilyCount = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount,
 		                                         nullptr);
 
+		// 创建一个向量来存储所有队列家族，并获取队列家族列表
 		std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
 		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount,
 		                                         queueFamilies.data());
 
 		int i = 0;
 		for (const auto &queueFamily : queueFamilies) {
+			// 检查当前队列家族是否支持图形命令
 			if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-				indices.graphicsFamily =
-				    i; // 如果当前队列家族支持图形命令，则保存其索引值。
+				indices.graphicsFamily = i;
 			}
+
+			// 检查当前队列家族是否支持呈现操作
+			VkBool32 presentSupport = false;
+			vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_Surface,
+			                                     &presentSupport);
+			if (presentSupport) {
+				indices.presentFamily = i;
+			}
+
+			// 如果已经找到了支持图形命令和呈现操作的队列家族，则退出循环
 			if (indices.isComplete()) {
-				break; // 找到后即可退出。
+				break;
 			}
+
 			i++;
 		}
+
 		return indices;
+	}
+
+	// Logical device and queues
+	void createLogicalDevice() {
+		// 查找支持所需队列家族的物理设备
+		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+		// 初始化用于存储设备队列创建信息的向量，并创建一个包含所有独特队列家族的集合
+		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+		std::set<uint32_t> uniqueQueueFamilies = {
+		    indices.graphicsFamily.value(), indices.presentFamily.value()};
+
+		// 设置队列优先级并为每个独特队列家族创建VkDeviceQueueCreateInfo结构体
+		float queuePriority = 1.0f;
+		for (uint32_t queueFamily : uniqueQueueFamilies) {
+			VkDeviceQueueCreateInfo queueCreateInfo{};
+			queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queueCreateInfo.queueFamilyIndex = queueFamily;
+			queueCreateInfo.queueCount = 1;
+			queueCreateInfo.pQueuePriorities = &queuePriority;
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
+
+		// 初始化物理设备特性结构体
+		VkPhysicalDeviceFeatures deviceFeatures{};
+
+		// 配置设备创建信息
+		VkDeviceCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+		createInfo.queueCreateInfoCount =
+		    static_cast<uint32_t>(queueCreateInfos.size());
+		createInfo.pQueueCreateInfos = queueCreateInfos.data();
+		createInfo.pEnabledFeatures = &deviceFeatures;
+		createInfo.enabledExtensionCount =
+		    static_cast<uint32_t>(deviceExtensions.size());
+		createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+
+		// 当启用验证层时，设定启用的验证层数量和名称
+		if (enableValidationLayers) {
+			createInfo.enabledLayerCount =
+			    static_cast<uint32_t>(validationLayers.size());
+			createInfo.ppEnabledLayerNames = validationLayers.data();
+		} else {
+			// 若未启用验证层，则设定启用的验证层数量为0
+			createInfo.enabledLayerCount = 0;
+		}
+
+		// 创建逻辑设备，若创建失败则抛出运行时错误
+		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &m_Device) !=
+		    VK_SUCCESS) {
+			throw std::runtime_error("Failed to create logical device!");
+		}
+
+		// 获取设备队列的引用，这将用于图形和计算命令的提交
+		vkGetDeviceQueue(m_Device, indices.graphicsFamily.value(), 0,
+		                 &graphicsQueue);
+		vkGetDeviceQueue(m_Device, indices.presentFamily.value(), 0,
+		                 &presentQueue);
+	}
+
+	// Window Surface
+	void createSurface() {
+		// 使用glfwCreateWindowSurface函数创建窗口表面，如果创建失败则抛出运行时错误
+		if (glfwCreateWindowSurface(m_Instance, m_Window, nullptr,
+		                            &m_Surface) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create window surface!");
+		}
+	}
+
+	// Swap Chain
+	bool checkDeviceExtensionSupport(VkPhysicalDevice device) {
+		uint32_t extensionCount;
+
+		// 获取设备扩展数量
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount,
+		                                     nullptr);
+
+		// 创建一个向量用于存储可用的扩展属性
+		std::vector<VkExtensionProperties> avaliableExtensions(extensionCount);
+
+		// 获取所有可用的设备扩展
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount,
+		                                     avaliableExtensions.data());
+
+		// 创建一个集合，包含所需要的所有扩展。
+		std::set<std::string> requiredExtensions(deviceExtensions.begin(),
+		                                         deviceExtensions.end());
+
+		// 遍历所有可用扩展，如果此扩展在所需扩展中，则从所需扩展集合中移除该扩展
+		for (const auto &extension : avaliableExtensions) {
+			requiredExtensions.erase(extension.extensionName);
+		}
+
+		// 如果所有所需的扩展都被找到并从集合中移除，那么集合应为空，返回值为true
+		return requiredExtensions.empty();
+	}
+
+	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) {
+		SwapChainSupportDetails details;
+		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, m_Surface,
+		                                          &details.capabilities);
+		uint32_t formatCount;
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_Surface, &formatCount,
+		                                     nullptr);
+		if (formatCount != 0) {
+			details.formats.resize(formatCount);
+			vkGetPhysicalDeviceSurfaceFormatsKHR(
+			    device, m_Surface, &formatCount, details.formats.data());
+		}
+		uint32_t presentModeCount;
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_Surface,
+		                                          &presentModeCount, nullptr);
+		if (presentModeCount != 0) {
+			details.presentModes.resize(presentModeCount);
+			vkGetPhysicalDeviceSurfacePresentModesKHR(
+			    device, m_Surface, &presentModeCount,
+			    details.presentModes.data());
+		}
+		return details;
 	}
 };
 
