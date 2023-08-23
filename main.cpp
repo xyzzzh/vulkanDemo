@@ -116,6 +116,9 @@ class HelloTriangleApplication {
 	VkFormat swapChainImageFormat; // 交换链图像的格式
 	VkExtent2D swapChainExtent;    // 交换链图像的尺寸
 
+	// 存储Image View
+	std::vector<VkImageView> swapChainImageViews;
+
 	void initWindow() {
 		// 初始化GLFW库
 		glfwInit();
@@ -137,6 +140,7 @@ class HelloTriangleApplication {
 		pickPhysicalDevice();
 		createLogicalDevice();
 		createSwapChain();
+		createImageViews();
 	}
 
 	void mainLoop() {
@@ -146,6 +150,9 @@ class HelloTriangleApplication {
 	}
 
 	void cleanUp() {
+		for (auto imageView : swapChainImageViews) {
+			vkDestroyImageView(m_Device, imageView, nullptr);
+		}
 		vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
 		// Logical devices don't interact directly with instances, which is why
 		// it's not included as a parameter.
@@ -712,6 +719,36 @@ class HelloTriangleApplication {
 		// 保存交换链图像的格式及范围
 		swapChainImageFormat = surfaceFormat.format;
 		swapChainExtent = extent;
+	}
+
+	// Image View
+	// 为每个VkImage创建对应的VkImageView
+	void createImageViews() {
+		swapChainImageViews.resize(swapChainImages.size());
+		for (size_t i = 0; i < swapChainImages.size(); i++) {
+			VkImageViewCreateInfo createInfo{};
+			createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			createInfo.image = swapChainImages[i];
+			createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			createInfo.format = swapChainImageFormat;
+			// VK_COMPONENT_SWIZZLE_IDENTITY
+			// 表示我们不会改变原始通道的顺序，也就是默认的映射
+			createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			// MIP 映射级别
+			createInfo.subresourceRange.baseMipLevel = 0;
+			createInfo.subresourceRange.levelCount = 1;
+			// 要访问的图像层数
+			createInfo.subresourceRange.baseArrayLayer = 0;
+			createInfo.subresourceRange.layerCount = 1;
+			if (vkCreateImageView(m_Device, &createInfo, nullptr,
+			                      &swapChainImageViews[i]) != VK_SUCCESS) {
+				throw std::runtime_error("Failed to create image views!");
+			}
+		}
 	}
 };
 
