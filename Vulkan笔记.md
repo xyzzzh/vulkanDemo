@@ -1,6 +1,10 @@
-Part 1 Vulkan学习
+[TOC]
 
-1.1 Drawing a triangle
+
+
+# 1. Drawing a triangle
+
+## 1.1 Setup
 
 ```C++
 // 基本框架
@@ -65,7 +69,7 @@ application to the driver.
 
 Vulkan API 允许开发者查询物理设备支持的所有队列家族及其能力，这样开发者就可以根据自己的需求选择最适合的队列家族进行操作。
 
-
+## 1.2 Presentation
 
 ### **1.2.1 Window Surface**
 
@@ -122,11 +126,13 @@ void createSurface() {
 
 - **VK_PRESENT_MODE_FIFO_KHR**
   ：交换链是一个队列，当显示刷新时，显示器从队列前面取出一个图像，程序在队列后面插入渲染的图像。如果队列已满，那么程序必须等待。这与现代游戏中找到的垂直同步最相似。显示刷新的那一刻被称为**“
+  
   **垂直空白**”**。**
 - **VK_PRESENT_MODE_FIFO_RELAXED_KHR**：如果应用程序延迟，并且在最后一个垂直空白时队列为空，那么此模式只与前一个模式有所不同。而不是等待下一个垂直空白，图像在最终到达时立即传输。这可能会导致可见的撕裂。
 
 - **VK_PRESENT_MODE_MAILBOX_KHR**
   ：这是第二种模式的另一种变体。当队列已满时，而不是阻塞应用程序，已经排队的图像简单地被新的图像替换。此模式可用于尽可能快地渲染帧，同时仍然避免撕裂，导致比标准垂直同步更少的延迟问题。这通常被称为**“
+  
   **三重缓冲**”**，尽管存在三个缓冲区并不一定意味着帧率是解锁的。
 
 ```C++
@@ -202,3 +208,159 @@ VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
 > 通常，一个物理设备(如GPU)可以有多个队列家族，每个都支持不同类型的操作。不过，并非所有设备上的所有队列家族都必须是不同的。在某些硬件上，图形和显示操作可能由同一个队列家族处理，这意味着图形队列家族和显示队列家族是相同的。然而，在其他硬件上，图形和显示操作可能由不同的队列家族处理，即图形队列家族和显示队列家族是不同的。
 >
 > 所以，"图形队列家族和显示队列家族是相同或者不同"，实际上是指示了你的应用程序在处理图形渲染和图像显示时是否需要切换队列家族。如果它们是相同的，那么你的应用程序可以简化逻辑，使得所有的图形和显示任务都在同一个队列家族中进行。如果它们不同，则需要适当地处理队列家族之间的切换和资源所有权转移。
+
+### 1.2.3 Image View
+
+要在渲染管线中使用任何 VkImage，包括交换链中的那些，我们必须创建一个 VkImageView 对象。图像视图Image View实质上就是图像的一个视窗。它描述了如何访问图像以及访问图像的哪个部分，例如，是否应将其视为没有任何 mipmap 层级的2D纹理深度纹理。
+
+每个 VkImage 通常都需要一个对应的 VkImageView。VkImageView 本质上是 VkImage 的一个视图，在渲染过程中它描述了如何访问图像以及访问图像的哪个部分。这使得你可以选择图像的一部分进行操作，或者指定图像的特定用途（例如颜色附件、深度附件等）。这种灵活性使得你在不同的渲染阶段可以以不同的方式查看和使用同一 VkImage。
+
+```C++
+// Image View
+	void createImageViews() {
+		swapChainImageViews.resize(swapChainImages.size());
+		for (size_t i = 0; i < swapChainImages.size(); i++) {
+			VkImageViewCreateInfo createInfo;
+			createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			createInfo.image = swapChainImages[i];
+			createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			createInfo.format = swapChainImageFormat;
+			// VK_COMPONENT_SWIZZLE_IDENTITY
+			// 表示我们不会改变原始通道的顺序，也就是默认的映射
+			createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+			createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			// MIP 映射级别
+			createInfo.subresourceRange.baseMipLevel = 0;
+			createInfo.subresourceRange.levelCount = 1;
+			// 要访问的图像层数
+			createInfo.subresourceRange.baseArrayLayer = 0;
+			createInfo.subresourceRange.layerCount = 1;
+			if (vkCreateImageView(m_Device, &createInfo, nullptr,
+			                      &swapChainImageViews[i]) != VK_SUCCESS) {
+				throw std::runtime_error("Failed to create image views!");
+			}
+		}
+	}
+```
+
+
+
+>**VkImageView 与 Surface**
+>
+>`VkImageView`和`Surface`都是Vulkan中的重要概念，它们各自在图像渲染流程中扮演着重要角色。然而，这两者的功能和使用场景有明显的差异。
+>
+>### VkImageView
+>
+>`VkImageView`是对`VkImage`对象的一个视图或者子集。这个视图定义了如何访问图像以及如何将图像解释为特定的像素格式。例如，你可以创建一个视图来显示图像的一个子集、特定的层级、特定的色彩通道等等。`VkImageView`主要用于图像资源的读写操作，比如纹理采样、附件读写等。
+>
+>### Surface
+>
+>`Surface`在Vulkan中代表一个平台相关的窗口或者界面，用于显示渲染后的图像。无论你在哪种平台(Windows，Linux，Android等)上运行Vulkan程序，`Surface`都是与特定平台窗口系统交互的桥梁，用于将Vulkan图像内容展示到屏幕上。
+>
+>### 关系
+>
+>`VkImageView`和`Surface`之间的关系可以简单概括为：`VkImageView`常用于管理和使用图像数据，而`Surface`则用于将这些图像数据显示到用户的屏幕上。当我们完成一次Vulkan的渲染操作时，必须先通过`VkImageView`将图像资源呈现到一个 `VkFramebuffer`, 然后再通过`Surface`将它们呈现到应用程序窗口中。
+>
+>换句话说，`VkImageView`与`Surface`一起工作，以实现图像的创建、处理和最终的显示。
+>
+>希望这能帮助您更好地理解`VkImageView`和`Surface`在Vulkan中的作用和关系。
+
+## 1.3 渲染管线基础
+
+### 1.3.1 引论
+
+![img](https://vulkan-tutorial.com/images/vulkan_simplified_pipeline.svg)
+
+1. 输入装配器从你指定的缓冲区收集原始顶点数据，并可能使用索引缓冲区来重复某些元素，无需复制顶点数据本身。
+
+2. 每个顶点都会运行顶点着色器，通常应用变换将顶点位置从模型空间转换到屏幕空间。它还会将每个顶点的数据传递到管道中。
+
+3. 曲面细分着色器允许你根据某些规则对几何体进行细分，以提高网格质量。这通常用于使砖墙和楼梯等表面在靠近时看起来不那么平坦。
+
+4. 几何着色器在每个图元（三角形，线，点）上运行，并可以丢弃它或输出比进入的图元更多的图元。这与细分着色器相似，但要灵活得多。然而，在现今的应用程序中并没有大量使用，因为除了 Intel 的集成 GPU 外，大多数显卡的性能并不好。
+
+5. 光栅化阶段将图元离散化为片段。这些是他们在帧缓冲区上填充的像素元素。任何落在屏幕外的片段都会被丢弃，顶点着色器输出的属性会在片段中插值，如图所示。通常也会在此处丢弃位于其他图元片段后面的片段，因为有深度测试。
+
+6. 片段着色器会为每个幸存的片段调用，并确定将片段写入哪个帧缓冲器，以及使用哪种颜色和深度值。它可以使用来自顶点着色器的插值数据来实现这一点，这可以包括纹理坐标和用于照明的法线等内容。
+
+7. 颜色混合阶段应用操作以混合映射到帧缓冲器中同一像素的不同片段。片段可以简单地覆盖彼此，或者根据透明度进行加和或混合。
+
+绿色阶段被称为固定功能阶段。这些阶段允许你使用参数调整它们的操作，但它们的工作方式是预先定义的。
+
+另一方面，橙色阶段是可编程的，这意味着你可以向图形卡上传自己的代码，以精确地应用你想要的操作。这允许你使用片段着色器来实现从纹理和照明到光线追踪器等任何东西。这些程序同时在许多 GPU 核心上运行，以并行处理许多对象，例如顶点和片段。
+
+如果你以前使用过 OpenGL 和 Direct3D 等旧API，那么你会习惯于随心所欲地更改任何管道设置，如使用 glBlendFunc 和 OMSetBlendState 等调用。Vulkan 中的图形管道几乎完全是不可变的，所以如果你想要更改着色器，绑定不同的帧缓冲器或更改混合函数，你必须从头开始重新创建管道。缺点是你将不得不创建一些管道，这些管道代表了你在渲染操作中想要使用的所有不同状态的组合。然而，由于你将要在管道中执行的所有操作都是预先知道的，驱动程序可以更好地为其优化。
+
+根据你打算做什么，一些可编程阶段是可选的。例如，如果你只是绘制简单的几何体，可以禁用曲面细分和几何阶段。如果你只对深度值感兴趣，那么你可以禁用片段着色器阶段，这对生成阴影图非常有用。
+
+### 1.3.2 Shader模块
+
+与早期的API不同，Vulkan中的着色器代码必须以字节码格式指定，而不是像GLSL和HLSL那样的人类可读语法。这种字节码格式被称为SPIR-V，旨在与Vulkan和OpenCL（两者均为Khronos API）一起使用。它是一种可以用来编写图形和计算着色器的格式，但在这个教程中，我们将专注于在Vulkan的图形管道中使用的着色器。
+
+使用字节码格式的优点在于，由GPU厂商编写的将着色器代码转换为本地代码的编译器复杂性明显减小。过去的经验表明，对于像GLSL这样的人类可读语法，一些GPU供应商对标准的解释相当灵活。如果你恰好用这些供应商的GPU编写了非平凡的着色器，那么你可能会冒着其他供应商的驱动程序因语法错误拒绝你的代码的风险，甚至更糟糕的情况是，由于编译器错误，你的着色器运行得不一样。有了像SPIR-V这样直接的字节码格式，这种情况希望能够避免。
+
+然而，这并不意味着我们需要手工编写这个字节码。Khronos发布了他们自己的供应商独立的编译器，可以将GLSL编译成SPIR-V。这个编译器设计用来验证你的着色器代码是否完全符合标准，并生成一个你可以与你的程序一起发货的SPIR-V二进制文件。你也可以把这个编译器作为一个库，以在运行时生成SPIR-V，但在这个教程中我们不会这么做。尽管我们可以通过glslangValidator.exe直接使用这个编译器，但我们将使用Google的**glslc.exe**。glslc的优点在于，它使用与GCC和Clang等知名编译器相同的参数格式，并包含一些额外的功能，如includes。它们都已经包含在Vulkan SDK中，所以你不需要下载任何额外的东西。
+
+GLSL是一种具有C风格语法的着色语言。用它编写的程序有一个主函数，每个对象都会调用该函数。GLSL使用全局变量处理输入和输出，而不是使用参数作为输入和返回值作为输出。该语言包含许多用于图形编程的特性，如内置向量和矩阵原语。函数用于操作如叉积、矩阵-向量积和围绕向量的反射等操作。向量类型被称为vec，后面带有表示元素数量的数字。例如，一个3D位置将存储在vec3中。可以通过成员如.x来访问单个组件，也可以同时从多个组件创建新的向量。例如，表达式vec3(1.0, 2.0, 3.0).xy会导致vec2。向量的构造函数也可以接收向量对象和标量值的组合。例如，vec3可以用vec3(vec2(1.0, 2.0), 3.0)构造。
+
+正如前一章所提到的，我们需要编写一个顶点着色器和一个片段着色器才能在屏幕上显示出一个三角形。接下来的两节将介绍每一个着色器的GLSL代码，然后我将向你展示如何生成两个SPIR-V二进制文件并加载到程序中。
+
+#### 1. Vertex Shader顶点着色器
+
+顶点着色器处理每个传入的顶点。它将顶点的属性（如世界位置，颜色，法线和纹理坐标）作为输入。输出是裁剪坐标中的最终位置以及需要传递给片段着色器的属性，如颜色和纹理坐标。然后，这些值将通过光栅化程序在片段上进行插值，以产生平滑的渐变。
+
+裁剪坐标是顶点着色器产生的四维向量，随后将整个向量通过其最后一个分量来转换为归一化设备坐标。这些归一化设备坐标是将帧缓冲区映射到类似于以下的[-1, 1]乘[-1, 1]坐标系统的齐次坐标：
+
+![img](https://vulkan-tutorial.com/images/normalized_device_coordinates.svg)
+
+> 裁剪坐标和归一化设备坐标 (NDC) 是3D图形渲染流程中的两个不同阶段。它们都是在顶点着色阶段和光栅化阶段之间进行的变换过程的一部分。
+>
+> 1. **裁剪坐标 (Clip Coordinates)**：当顶点位置从世界空间被转换到视图空间，再通过透视投影矩阵转换到裁剪空间时，就得到了裁剪坐标。这个四维向量用于定义视锥体（frustum），也就是我们在屏幕上实际看到的场景的范围。裁剪坐标的w分量可能不等于1，这是因为透视除法还没有发生。
+> 2. **归一化设备坐标 (Normalized Device Coordinates, NDC)**：通过透视除法（每个裁剪坐标的x、y、z分量都除以其w分量）得到归一化设备坐标。这是一个齐次坐标系，将视锥体映射到一个立方体，范围通常是[-1, 1]乘[-1, 1]乘[-1, 1]。此时，任何位于这个范围外的顶点都会被剔除或裁剪掉。
+>
+> 简单来说，裁剪坐标是用来确定哪些部分应该显示在屏幕上，而归一化设备坐标则是用来决定这些部分如何在屏幕上显示。
+
+Vulkan的NDC坐标系与OpenGL不同：
+
+- x轴：**-1**~**1**，**右**为正方向
+- y轴：**-1**~**1**，**下**为正方向
+- z轴： **0**~**1**，**远**为正方向
+
+#### 2. 使用glslc编译shader为spir-v字节码
+
+```shell
+@echo off
+setlocal
+
+:: 当前脚本所在目录
+set "SCRIPT_DIR=%~dp0"
+
+:: 设置Vulkan SDK路径为环境变量，或者你可以直接将其添加到系统环境变量中
+set "VULKAN_SDK=C:/VulkanSDK/1.3.250.1"
+:: 路径正规化，去除最后的斜杠（如果存在）
+set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+"%VULKAN_SDK%\Bin\glslc.exe" "%SCRIPT_DIR%/../shaders/triangle.vert" -o "%SCRIPT_DIR%/../shaders/bin/triangle.vert.spv"
+"%VULKAN_SDK%\Bin\glslc.exe" "%SCRIPT_DIR%/../shaders/triangle.frag" -o "%SCRIPT_DIR%/../shaders/bin/triangle.frag.spv"
+pause
+```
+
+#### 3. 在图形管线中对shader进行载入
+
+载入shader编译生成的spv字节码，然后根据字节码生成对应的顶点ShaderModule和片段ShaderModule，为顶点和片段分别建立shaderStageInfo，填充对应字段，最后声明shaderStages
+
+```C++
+VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+```
+
+**关于`Shader`、`ShaderModule` 和 `ShaderStage`**
+
+在Vulkan中，`Shader`、`ShaderModule` 和 `ShaderStage` 是着色器的三个关键组成部分，他们之间的关系如下：
+
+1. **Shader：** 着色器是一个程序，用于在图形管线的各种阶段执行操作。最常见的类型包括顶点着色器（对顶点数据进行操作）和片段着色器（计算像素颜色）。着色器通常用高级着色语言(HLSL, GLSL等)编写，并编译为字节码。
+2. **ShaderModule：** 在Vulkan中，着色器代码（已经被编译为字节码）必须封装在一个`VkShaderModule`对象中。这个对象就像一个容器，存储了着色器的字节码。可以理解为，`ShaderModule` 是用于管理着色器字节码的Vulkan对象。
+3. **ShaderStage：** 在Vulkan的渲染管线中，每个阶段都可以使用一个着色器。这些阶段包括顶点处理、几何处理、光栅化、片段处理等。`ShaderStage` 定义了着色器应该在管线的哪个阶段运行。例如，顶点着色器在顶点处理阶段运行，片段着色器在片段处理阶段运行。
+
+因此，你首先要写一个着色器，然后将其编译为字节码并包装在一个`ShaderModule`中。最后，你需要创建一个`ShaderStage`来指定在渲染管线的哪个阶段使用这个`ShaderModule`。

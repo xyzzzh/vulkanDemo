@@ -17,4 +17,4 @@ link_directories(C:/Users/xiuyuan.zhu/Lib/glfw-3.3.8.bin.WIN64/lib-mingw-w64)
 link_libraries(vulkan-1)
 link_libraries(glfw3)
 
-add_executable(vulkanDemo main.cpp)
+add_executable(vulkanDemo src/main.cpp)
