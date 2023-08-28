@@ -628,7 +628,19 @@ initialLayout 指定了渲染通道开始前图像的布局。finalLayout 指定
 >
 > 值得注意的是，虽然一个渲染管线可以关联多个 render pass，但**每次 draw call 只能在一个特定的 render pass 上下文中进行**。这意味着，你不能在一个 draw call 中同时使用两个或更多的 render pass。
 
-### 1.3.5 
+> **`VkImageView`和`attachment`**
+>
+> 在Vulkan中，`VkImageView`和附件（attachment）之间的关系非常紧密。
+>
+> 在渲染过程中，附件是一个用于读取、写入和存储像素数据的抽象概念。每个附件都关联着一个图像资源，这个图像资源实际上就是通过`VkImageView`来表示的。
+>
+> 当我们创建一个`VkRenderPass`时，需要定义一组附件描述（attachment descriptions），每个附件描述都标识出在渲染管线的哪个阶段使用该附件，以及如何使用它（例如颜色缓冲、深度缓冲等）。然而，这些描述并没有指定具体的数据存储位置，也就是说，它们并没有直接关联到一个实际的图像资源。
+>
+> 这就是`VkImageView`的作用所在。当我们创建一个`VkFramebuffer`对象时，需要为每个附件提供一个对应的`VkImageView`对象。这样，每个附件就会被绑定到一个实际的图像资源，即`VkImageView`所引用的`VkImage`。
+>
+> 因此，可以说附件在逻辑上代表了渲染管线中的一个输入/输出位置，而`VkImageView`则提供了访问这个位置所需的具体图像资源的方式。
+
+### 1.3.5 Conclusion
 
 我们现在可以将前面章节的所有结构和对象组合起来，创建图形管线！以下是我们现在拥有的对象类型，做一个快速回顾：
 
@@ -644,3 +656,34 @@ initialLayout 指定了渲染通道开始前图像的布局。finalLayout 指定
 vkCreateGraphicsPipelines函数实际上比Vulkan中的常用对象创建函数有更多的参数。它被设计为接收多个VkGraphicsPipelineCreateInfo对象，并在一次调用中创建多个VkPipeline对象。
 
 我们传递了VK_NULL_HANDLE参数的第二个参数，引用了一个可选的VkPipelineCache对象。管线缓存可以被用来存储和重用跨多次调用vkCreateGraphicsPipelines，甚至跨程序执行（如果缓存被存储到文件）的管线创建相关数据。这使得在以后的时间大大加速管线创建成为可能。我们将在管线缓存章节中详细讲解这部分内容。
+
+## 1.4 Drawing
+
+### 1.4.1 Framebuffers
+
+在创建渲染通道时指定的附件是通过将它们包装入VkFramebuffer对象来绑定的。一个帧缓存对象引用所有代表附件的VkImageView对象。在我们的情况下，那只会是一个：颜色附件。然而，我们必须使用哪个图像作为附件取决于当我们为展示获取一个图像时，交换链返回的是哪个图像。这意味着我们必须为交换链中的所有图像创建一个帧缓存，并在绘图时使用对应于检索到的图像的那个帧缓存。
+
+如你所见，创建帧缓存相当直接了当。我们首先需要指定帧缓冲区需要与哪个渲染通道兼容。你只能使用与其兼容的渲染通道中的帧缓冲区，这大致意味着它们使用相同数量和类型的附件。
+
+attachmentCount和pAttachments参数指定应绑定到渲染通道pAttachment数组中的各个附件描述的VkImageView对象。
+
+width和height参数不言自明，layers则指的是图像数组中的层数。我们的交换链图像是单一图像，所以层数为1。
+
+我们应该在它们基于的图像视图和渲染通道之前删除帧缓冲区，但只有在我们完成渲染后才能这样做。
+
+> 在Vulkan中，`VkFramebuffer`和`VkImageView`之间有紧密的关系。
+>
+> `VkImageView`可以视为图像的一个视图或复制品，它描述了如何访问图像以及图像的哪一部分应该被访问。
+>
+> 而`VkFramebuffer`则是渲染操作的最终目标，它包含一个或多个`VkImageView`对象。每个`VkImageView`都代表了一个附件（attachment），这些附件在渲染管线的不同阶段用于读取、写入和存储像素数据。
+>
+> 当你创建`VkFramebuffer`时，需要指定与其兼容的`VkRenderPass`，并提供绑定到渲染通道中附件描述的`VkImageView`对象数组。这就意味着，渲染结果将会被写入由`VkFramebuffer`引用的`VkImageView`所表示的附件。因此，具体来说，`VkImageView`定义了怎么样以及在哪里存储像素数据，而`VkFramebuffer`则定义了在哪些`VkImageView`中存储渲染结果。
+>
+> 因此，可以说`VkFramebuffer`和`VkImageView`在Vulkan的渲染过程中共同扮演了关键角色。
+>
+> 你可以将`VkFramebuffer`视为指向一组`VkImageView`对象的引用或指针。实际上，`VkFramebuffer`并不直接包含图像数据，而是通过引用`VkImageView`对象来间接访问这些数据。
+>
+> 在创建`VkFramebuffer`时，你需要提供一个`VkImageView`对象数组，每个`VkImageView`都代表了一个附件（可能是颜色、深度、模板缓冲区等）。当渲染操作发生时，这些附件被用于存储输入和输出的像素数据。
+>
+> 所以说，`VkFramebuffer`可以看作是一个指针，它指向了执行渲染操作所需的所有附件。但请注意，这只是一个比喻，实际的Vulkan API比这个概念复杂得多。
+

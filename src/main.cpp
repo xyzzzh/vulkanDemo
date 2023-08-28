@@ -129,6 +129,9 @@ class HelloTriangleApplication {
 	// Graphics pipeline
 	VkPipeline m_GraphicsPipeline;
 
+	// Framebuffer
+	std::vector<VkFramebuffer> m_SwapChainFramebuffers;
+
 	void initWindow() {
 		// 初始化GLFW库
 		glfwInit();
@@ -153,6 +156,7 @@ class HelloTriangleApplication {
 		createImageViews();
 		createRenderPass();
 		createGraphicsPipeline();
+		createFramebuffers();
 	}
 
 	void mainLoop() {
@@ -1005,6 +1009,29 @@ class HelloTriangleApplication {
 		if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr,
 		                       &m_RenderPass) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create render pass!");
+		}
+	}
+
+	// Framebuffer
+	void createFramebuffers() {
+		m_SwapChainFramebuffers.resize(swapChainImageViews.size());
+		for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+			VkImageView attachments[] = {swapChainImageViews[i]};
+
+			VkFramebufferCreateInfo framebufferInfo{};
+			framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+			framebufferInfo.renderPass = m_RenderPass;
+			framebufferInfo.attachmentCount = 1;
+			framebufferInfo.pAttachments = attachments;
+			framebufferInfo.width = swapChainExtent.width;
+			framebufferInfo.height = swapChainExtent.height;
+			framebufferInfo.layers = 1;
+
+			if (vkCreateFramebuffer(m_Device, &framebufferInfo, nullptr,
+			                        &m_SwapChainFramebuffers[i]) !=
+			    VK_SUCCESS) {
+				throw std::runtime_error("Failed to create framebuffer!");
+			}
 		}
 	}
 };
