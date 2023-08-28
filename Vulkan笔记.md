@@ -687,3 +687,172 @@ width和height参数不言自明，layers则指的是图像数组中的层数。
 >
 > 所以说，`VkFramebuffer`可以看作是一个指针，它指向了执行渲染操作所需的所有附件。但请注意，这只是一个比喻，实际的Vulkan API比这个概念复杂得多。
 
+### 1.4.2 Command buffers
+
+在Vulkan中，诸如绘图操作和内存传输等命令不是直接通过函数调用执行的。你必须将要执行的所有操作记录在命令缓冲区对象中。这样做的好处是，当我们准备告诉 Vulkan 我们想要做什么时，所有的命令一起提交，因为所有的命令都一起可用，Vulkan 可以更有效地处理这些命令。此外，如果需要，这还允许在多个线程中进行命令记录。
+
+#### 1. 命令池 Command Pool
+
+在我们创建命令缓冲区之前，需要先创建一个命令池。命令池负责管理用于存储缓冲区的内存，而命令缓冲区则从其中分配。添加一个新的类成员来存储 VkCommandPool。
+
+`VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`和`VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`都是命令池创建标志，但它们的含义和用途有所不同：
+
+1. `VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`: 这个标志表示命令缓冲区可能会频繁地被新命令重新记录（rerecorded）。在Vulkan中，你可以把一系列操作（例如绘图或内存传输等）录制到一个命令缓冲区中，然后在需要时执行这些操作。如果你知道某个命令缓冲区会经常被重用（即清空并填入新的命令），那么就可以在创建命令池时使用这个标志，Vulkan可能会根据此标志优化其内部的内存分配策略。
+2. `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`: 这个标志允许单独重置命令缓冲区。默认情况下，从同一个命令池分配的所有命令缓冲区必须一起被重置，也就是说，你不能只重置其中的一个，必须重置所有的。如果你设置了这个标志，那么就可以选择性地重置某个特定的命令缓冲区，而不是一口气重置所有的。
+
+这两个标志在某些情况下是很有用的。例如，如果你的应用程序每帧都要录制新的命令（比如因为摄像机移动、物体动画等），那么`VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`可能会提高效率。同样，如果你的应用程序需要管理大量的命令缓冲区，并且希望能够灵活地重置它们，那么`VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`就可能派上用场。
+
+通过在设备队列（例如我们获取的图形和演示队列）上提交命令缓冲区来执行它们。每个命令池只能分配在单一类型的队列上提交的命令缓冲区。我们将记录用于绘制的命令，这就是我们选择图形队列族的原因。
+
+#### 2. Command buffer
+
+命令缓冲区在其命令池被销毁时会自动释放，所以我们不需要进行显式的清理。
+
+现在我们将开始编写一个createCommandBuffer函数，从命令池中分配单个命令缓冲区。 命令缓冲区使用vkAllocateCommandBuffers函数进行分配，该函数接受一个VkCommandBufferAllocateInfo结构体作为参数，该结构体指定了命令池和要分配的缓冲区的数量：
+
+level参数指定分配的命令缓冲区是主命令缓冲区还是次级命令缓冲区。
+
+- VK_COMMAND_BUFFER_LEVEL_PRIMARY：可以提交到队列进行执行，但不能从其他命令缓冲区调用。 
+- VK_COMMAND_BUFFER_LEVEL_SECONDARY：不能直接提交，但可以从主命令缓冲区调用。 
+
+虽然我们在这里不会使用次级命令缓冲区的功能，但你可以想象它有助于从主命令缓冲区重用常见的操作。由于我们只分配一个命令缓冲区，所以commandBufferCount参数就是1。
+
+#### 3. Command Buffer Recording
+
+现在我们将开始编写recordCommandBuffer函数，该函数将我们想要执行的命令写入命令缓冲区中。使用的VkCommandBuffer将作为参数传入，同时也会传入我们想要写入的当前交换链图像的索引。
+
+我们总是通过调用vkBeginCommandBuffer并使用一个小的VkCommandBufferBeginInfo结构体作为参数来开始记录一个命令缓冲区，该结构体指定了这个特定命令缓冲区使用的一些细节。
+
+flags参数指定了我们将如何使用命令缓冲区。可用的值包括:
+
+- VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT：命令缓冲区将在执行一次后立即重新记录。 
+- VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT：这是一个完全在单个渲染通道内部的次级命令缓冲区。 
+- VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT：命令缓冲区可以在已经等待执行的同时被重新提交。 
+
+对于我们当前的情况，这些标志都不适用。
+
+pInheritanceInfo参数只对次级命令缓冲区有关系。它指定了从调用的主命令缓冲区继承哪些状态。
+
+如果命令缓冲区已经被记录过一次，那么调用vkBeginCommandBuffer会隐式地重置它。在以后的时间里，无法向缓冲区追加命令。
+
+> 在Vulkan中，“record”是一个非常重要的概念。记录，或者编程，是指将一系列操作（命令）编入一个命令缓冲区中。
+>
+> 当你"记录"一个命令缓冲区时，你会使用各种Vulkan函数来填充（或记录）该命令缓冲区。这些函数对应的行为可能包括渲染、内存传输、计算等。这些命令不会立即被执行，而是存储在命令缓冲区中以供稍后执行。这样做的好处是可以预先准备多个操作，然后一次性提交给GPU进行处理，从而实现更有效的并行计算和资源管理。
+>
+> 在这种情况下，"记录"一个命令并不意味着它已经执行——只是说它已经被安排在一个序列中，等待被发送到GPU上。只有当命令缓冲区被提交到命令队列并且达到其在队列中的点时，其中的命令才会被执行。
+>
+> 因此，理解"记录"的概念就是理解Vulkan如何组织和调度GPU上的工作：你创建并"记录"命令缓冲区，然后在适当的时间将其提交给GPU执行。
+>
+> 这些命令可能包含各种渲染任务、内存拷贝操作等。这些录入的命令并不会立即执行，而是会被存储在命令缓冲区中，等待后续一次性提交给图形处理器（GPU）进行执行。
+>
+> 因此，"记录"一个命令缓冲区实际上就是填充或组织这个缓冲区，以便包含一系列将被GPU执行的命令。这种方式允许高效地批量处理操作，并可以优化GPU资源的使用。
+
+**Command Pool, Command Buffer and Record**
+
+> 在Vulkan中，命令池（Command Pool）是用于存储和管理命令缓冲区的对象。你可以将其视为一个命令缓冲区的存储池。
+>
+> 具体来说，命令缓冲区必须从某个命令池中分配出来，并且当命令池被销毁时，其中的所有命令缓冲区也会被自动释放。这意味着你无需单独管理每个命令缓冲区的生命周期，只需要管理它们所属的命令池即可。
+>
+> 这里的"record"概念与命令池和命令缓冲区紧密相关。当你“记录”命令到一个命令缓冲区时，你实际上是在使用命令池中分配的空间来存储你想要GPU执行的命令序列。然后，你可以将这个已经“记录”了命令的缓冲区提交给GPU进行处理。
+>
+> 总的来说，命令池、命令缓冲区和"record"都是Vulkan中命令组织和调度过程的重要组成部分。首先你通过命令池创建并管理命令缓冲区，然后你将一系列命令“记录”到这些命令缓冲区中，最后再将这些缓冲区提交给GPU执行。
+
+#### 4. Starting a render pass
+
+通过vkCmdBeginRenderPass开始渲染通道，开始绘制。渲染通道是使用VkRenderPassBeginInfo结构体中的一些参数来配置的。
+
+```cpp
+VkRenderPassBeginInfo renderPassInfo{};
+renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+renderPassInfo.renderPass = renderPass;
+renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex];
+```
+
+首先定义的参数是渲染通道本身和需要绑定的附件。我们为每个交换链图像创建了一个帧缓冲区，并指定它为颜色附件。因此，我们需要绑定我们想要绘制到的交换链图像的帧缓冲区。通过传入的imageIndex参数，我们可以选择当前交换链图像对应的正确的帧缓冲区。
+
+```cpp
+renderPassInfo.renderArea.offset = {0, 0};
+renderPassInfo.renderArea.extent = swapChainExtent;
+```
+
+接下来的两个参数定义了渲染区域的大小。渲染区域定义了着色器加载和存储将在哪里进行。这个区域外的像素将具有未定义的值。为了获得最佳性能，它应该匹配附件的大小。
+
+```cpp
+VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+renderPassInfo.clearValueCount = 1;
+renderPassInfo.pClearValues = &clearColor;
+```
+
+最后两个参数定义了VK_ATTACHMENT_LOAD_OP_CLEAR用的清除值，我们将其作为颜色附件的加载操作。我将清除颜色简单地定义为黑色，不透明度为100%。
+
+```cpp
+vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+```
+
+现在，渲染通道可以开始了。所有记录命令的函数都可以通过它们的vkCmd前缀来识别。他们都返回void，所以直到我们完成记录才会有错误处理。
+
+每个命令的第一个参数始终是记录命令的命令缓冲区。第二个参数指定了我们刚刚提供的渲染通道的详细信息。最后一个参数控制渲染通道内的绘图命令如何提供。它可以有以下两个值之一：
+
+- VK_SUBPASS_CONTENTS_INLINE：渲染通道命令将嵌入在主命令缓冲区本身中，不会执行任何次级命令缓冲区。
+- VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS：渲染通道命令将从次级命令缓冲区执行。
+
+我们不会使用次级命令缓冲区，所以我们选择第一个选项。
+
+#### 5. Basic drawing commands
+
+现在我们可以绑定图形管线了：
+
+```cpp
+vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+```
+
+第二个参数指定管线对象是图形管线还是计算管线。我们已经告诉Vulkan在图形管线中执行哪些操作以及在片段着色器中使用哪个附件。
+
+正如在固定函数章节中所提到的，我们确实为这个管线指定了视口和剪裁状态为动态。因此，在发出我们的绘制命令之前，我们需要在命令缓冲区中设置它们：
+
+```cpp
+VkViewport viewport{};
+viewport.x = 0.0f;
+viewport.y = 0.0f;
+viewport.width = static_cast<float>(swapChainExtent.width);
+viewport.height = static_cast<float>(swapChainExtent.height);
+viewport.minDepth = 0.0f;
+viewport.maxDepth = 1.0f;
+vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+VkRect2D scissor{};
+scissor.offset = {0, 0};
+scissor.extent = swapChainExtent;
+vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+```
+
+现在我们准备好发出绘制三角形的命令了：
+
+```cpp
+vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+```
+
+实际的vkCmdDraw函数有点anticlimactic（虎头蛇尾的），但由于我们事先指定了所有信息，所以它非常简单。除了命令缓冲区，它还有以下参数：
+
+- vertexCount：尽管我们没有顶点缓冲区，但我们实际上仍然有3个顶点要绘制。
+- instanceCount：用于实例渲染，如果你不做这个，使用1。
+- firstVertex：用作顶点缓冲区的偏移量，定义gl_VertexIndex的最小值。
+- firstInstance：用于实例渲染的偏移量，定义gl_InstanceIndex的最小值。
+
+#### 6. Finishing Up
+
+现在可以结束渲染通道了:
+
+```cpp
+vkCmdEndRenderPass(commandBuffer);
+```
+
+我们已经完成了命令缓冲区的记录:
+
+```cpp
+if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+    throw std::runtime_error("failed to record command buffer!");
+}
+```
+
+在下一章节，我们将编写主循环的代码，该循环将从交换链中获取一个图像，记录并执行一个命令缓冲区，然后将完成的图像返回给交换链。

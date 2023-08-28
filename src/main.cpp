@@ -96,7 +96,7 @@ class HelloTriangleApplication {
 	// physicalDevice 是一个表示物理设备的对象，在这里我们初始化为
 	// VK_NULL_HANDLE。物理设备表示GPU设备，在 Vulkan
 	// 中，我们需要从所有可用的物理设备中选择一个进行操作。
-	VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+	VkPhysicalDevice m_PhysicalDevice = VK_NULL_HANDLE;
 	// m_Device 是一个 Vulkan
 	// 设备（Device）对象，它代表了一个物理设备上的逻辑设备， 程序中所有的
 	// Vulkan 操作，如创建图像缓冲、提交命令等，都需要通过这个逻辑设备进行。
@@ -132,6 +132,12 @@ class HelloTriangleApplication {
 	// Framebuffer
 	std::vector<VkFramebuffer> m_SwapChainFramebuffers;
 
+	// Command pool
+	VkCommandPool m_CommandPool;
+
+	// Command buffer
+	VkCommandBuffer m_CommandBuffer;
+
 	void initWindow() {
 		// 初始化GLFW库
 		glfwInit();
@@ -157,6 +163,8 @@ class HelloTriangleApplication {
 		createRenderPass();
 		createGraphicsPipeline();
 		createFramebuffers();
+		createCommandPool();
+		createCommandBuffer();
 	}
 
 	void mainLoop() {
@@ -271,13 +279,13 @@ class HelloTriangleApplication {
 		// 遍历所有设备，找到第一个符合我们要求的设备
 		for (const auto &device : devices) {
 			if (isDeviceSuitable(device)) {
-				physicalDevice = device;
+				m_PhysicalDevice = device;
 				break;
 			}
 		}
 
 		// 如果没有找到符合要求的设备，则抛出运行时错误
-		if (physicalDevice == VK_NULL_HANDLE) {
+		if (m_PhysicalDevice == VK_NULL_HANDLE) {
 			throw std::runtime_error("Failed to find a suitable GPU!");
 		}
 	}
@@ -502,7 +510,7 @@ class HelloTriangleApplication {
 	// Logical device and queues
 	void createLogicalDevice() {
 		// 查找支持所需队列家族的物理设备
-		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+		QueueFamilyIndices indices = findQueueFamilies(m_PhysicalDevice);
 
 		// 初始化用于存储设备队列创建信息的向量，并创建一个包含所有独特队列家族的集合
 		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
@@ -545,7 +553,7 @@ class HelloTriangleApplication {
 		}
 
 		// 创建逻辑设备，若创建失败则抛出运行时错误
-		if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &m_Device) !=
+		if (vkCreateDevice(m_PhysicalDevice, &createInfo, nullptr, &m_Device) !=
 		    VK_SUCCESS) {
 			throw std::runtime_error("Failed to create logical device!");
 		}
@@ -669,7 +677,7 @@ class HelloTriangleApplication {
 	void createSwapChain() {
 		// 查询物理设备对交换链的支持情况
 		SwapChainSupportDetails swapChainSupport =
-		    querySwapChainSupport(physicalDevice);
+		    querySwapChainSupport(m_PhysicalDevice);
 
 		// 选择表面格式
 		VkSurfaceFormatKHR surfaceFormat =
@@ -701,7 +709,7 @@ class HelloTriangleApplication {
 		createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
 		// 查找队列家族
-		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+		QueueFamilyIndices indices = findQueueFamilies(m_PhysicalDevice);
 		uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(),
 		                                 indices.presentFamily.value()};
 
@@ -1032,6 +1040,85 @@ class HelloTriangleApplication {
 			    VK_SUCCESS) {
 				throw std::runtime_error("Failed to create framebuffer!");
 			}
+		}
+	}
+
+	// Command Pool
+	void createCommandPool() {
+		QueueFamilyIndices queueFamilyIndices =
+		    findQueueFamilies(m_PhysicalDevice);
+
+		VkCommandPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+		poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+
+		if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool) !=
+		    VK_SUCCESS) {
+			throw std::runtime_error("Failed to create command pool!");
+		}
+	}
+
+	void createCommandBuffer() {
+		VkCommandBufferAllocateInfo allocateInfo{};
+		allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocateInfo.commandPool = m_CommandPool;
+		allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocateInfo.commandBufferCount = 1;
+
+		if (vkAllocateCommandBuffers(m_Device, &allocateInfo,
+		                             &m_CommandBuffer) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to allocate command buffers!");
+		}
+	}
+
+	void recordCommandBuffer(VkCommandBuffer commandBuffer,
+	                         uint32_t imageIndex) {
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = 0;
+		beginInfo.pInheritanceInfo = nullptr;
+
+		if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+			throw std::runtime_error(
+			    "Failed to begin recording command buffer!");
+		}
+
+		VkRenderPassBeginInfo renderPassInfo{};
+		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassInfo.renderPass = m_RenderPass;
+		renderPassInfo.framebuffer = m_SwapChainFramebuffers[imageIndex];
+		renderPassInfo.renderArea.offset = {0, 0};
+		renderPassInfo.renderArea.extent = swapChainExtent;
+
+		VkClearValue clearColor = {{{0.0f, 0.0f, 0.0f, 1.0f}}};
+		renderPassInfo.clearValueCount = 1;
+		renderPassInfo.pClearValues = &clearColor;
+
+		vkCmdBeginRenderPass(commandBuffer, &renderPassInfo,
+		                     VK_SUBPASS_CONTENTS_INLINE);
+
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		                  m_GraphicsPipeline);
+		VkViewport viewport{};
+		viewport.x = 0.0f;
+		viewport.y = 0.0f;
+		viewport.width = static_cast<float>(swapChainExtent.width);
+		viewport.height = static_cast<float>(swapChainExtent.height);
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+		vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+		VkRect2D scissor{};
+		scissor.offset = {0, 0};
+		scissor.extent = swapChainExtent;
+		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+		vkCmdEndRenderPass(commandBuffer);
+		if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to record command buffer!");
 		}
 	}
 };
