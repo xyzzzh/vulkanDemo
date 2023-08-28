@@ -120,8 +120,14 @@ class HelloTriangleApplication {
 	// 存储Image View
 	std::vector<VkImageView> swapChainImageViews;
 
-	//
+	// Pipeline Layout
 	VkPipelineLayout m_PipelineLayout;
+
+	// Render pass
+	VkRenderPass m_RenderPass;
+
+	// Graphics pipeline
+	VkPipeline m_GraphicsPipeline;
 
 	void initWindow() {
 		// 初始化GLFW库
@@ -145,6 +151,7 @@ class HelloTriangleApplication {
 		createLogicalDevice();
 		createSwapChain();
 		createImageViews();
+		createRenderPass();
 		createGraphicsPipeline();
 	}
 
@@ -155,7 +162,9 @@ class HelloTriangleApplication {
 	}
 
 	void cleanUp() {
+		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
+		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
 		for (auto imageView : swapChainImageViews) {
 			vkDestroyImageView(m_Device, imageView, nullptr);
 		}
@@ -786,6 +795,7 @@ class HelloTriangleApplication {
 		}
 		return shaderModule;
 	}
+
 	void createGraphicsPipeline() {
 		auto vertShaderCode = readFile("../shaders/bin/triangle.vert.spv");
 		auto fragShaderCode = readFile("../shaders/bin/triangle.frag.spv");
@@ -919,8 +929,83 @@ class HelloTriangleApplication {
 			throw std::runtime_error("Failed to create pipeline layout!");
 		}
 
+		VkGraphicsPipelineCreateInfo pipelineInfo{};
+		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		pipelineInfo.stageCount = 2;
+		pipelineInfo.pStages = shaderStages;
+		pipelineInfo.pVertexInputState = &vertexInputInfo;
+		pipelineInfo.pInputAssemblyState = &inputAssembly;
+		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pRasterizationState = &rasterizer;
+		pipelineInfo.pMultisampleState = &multisampling;
+		pipelineInfo.pDepthStencilState = nullptr;
+		pipelineInfo.pColorBlendState = &colorBlending;
+		pipelineInfo.pDynamicState = &dynamicState;
+		pipelineInfo.layout = m_PipelineLayout;
+		pipelineInfo.renderPass = m_RenderPass;
+		pipelineInfo.subpass = 0;
+		pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
+		pipelineInfo.basePipelineIndex = -1;
+
+		if (vkCreateGraphicsPipelines(m_Device, VK_NULL_HANDLE, 1,
+		                              &pipelineInfo, nullptr,
+		                              &m_GraphicsPipeline) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create graphics pipeline!");
+		}
+
 		vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
 		vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
+	}
+
+	// Render Pass
+	void createRenderPass() {
+		// 定义颜色附件描述符
+		VkAttachmentDescription colorAttachment{};
+		colorAttachment.format = swapChainImageFormat; // 设置图像的格式
+		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // 设置多重采样数量
+		colorAttachment.loadOp =
+		    VK_ATTACHMENT_LOAD_OP_CLEAR; // 加载操作为清除操作
+		colorAttachment.storeOp =
+		    VK_ATTACHMENT_STORE_OP_STORE; // 存储操作为保存渲染后的图像
+		colorAttachment.stencilLoadOp =
+		    VK_ATTACHMENT_LOAD_OP_DONT_CARE; // 模板加载操作为不关心
+		colorAttachment.stencilStoreOp =
+		    VK_ATTACHMENT_STORE_OP_DONT_CARE; // 模板存储操作为不关心
+		colorAttachment.initialLayout =
+		    VK_IMAGE_LAYOUT_UNDEFINED; // 初始布局为未定义
+		colorAttachment.finalLayout =
+		    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // 最终布局为可直接用于显示的布局
+
+		// 定义颜色附件引用
+		VkAttachmentReference colorAttachmentRef{};
+		colorAttachmentRef.attachment =
+		    0; // 指定要引用哪个附件（在本例中只有一个，即colorAttachment）
+		colorAttachmentRef.layout =
+		    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // 指定附件布局为优化的颜色附件布局
+
+		// 定义子通道描述符
+		VkSubpassDescription subpass{};
+		subpass.pipelineBindPoint =
+		    VK_PIPELINE_BIND_POINT_GRAPHICS; // 将管线绑定点设置为图形
+		subpass.colorAttachmentCount = 1;    // 设置颜色附件计数为1
+		subpass.pColorAttachments =
+		    &colorAttachmentRef; // 设置颜色附件数组的指针为colorAttachmentRef
+
+		// 创建渲染通道的信息
+		VkRenderPassCreateInfo renderPassInfo{};
+		renderPassInfo.sType =
+		    VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO; // 设置结构类型为渲染通道创建信息
+		renderPassInfo.attachmentCount = 1; // 设置附件计数为1
+		renderPassInfo.pAttachments =
+		    &colorAttachment; // 设置附件描述符的指针为colorAttachment
+		renderPassInfo.subpassCount = 1; // 设置子通道计数为1
+		renderPassInfo.pSubpasses = &subpass; // 设置子通道描述符的指针为subpass
+
+		// 如果不能成功创建渲染通道，则抛出运行时错误
+		if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr,
+		                       &m_RenderPass) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create render pass!");
+		}
 	}
 };
 

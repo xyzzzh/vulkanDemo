@@ -575,3 +575,72 @@ void cleanup() {
 以上就是所有固定函数状态的全部内容！从头开始设置所有这些确实需要大量工作，但优点是我们现在几乎完全了解图形管道中正在进行的一切！这降低了因为某些组件的默认状态不符合你的预期而遇到意外行为的机会。
 
 然而，在我们最终创建图形管道之前，还有一个对象需要创建，那就是渲染通道。
+
+### 1.3.4 Render Pass
+
+#### 1. Setup
+
+在我们完成管线创建之前，我们需要告诉Vulkan在渲染时会使用哪些帧缓冲附件。我们需要指定将有多少颜色和深度缓冲区，每个缓冲区要使用多少样本，以及如何处理它们在整个渲染操作中的内容。所有这些信息都包装在一个渲染通道对象中，我们将为此创建一个新的createRenderPass函数。在initVulkan中调用此函数，然后再调用createGraphicsPipeline方法。
+
+#### 2. Attachment description
+
+在我们的案例中，我们只有一个由交换链中的图像表示的颜色缓冲区附件。
+
+loadOp 和 storeOp 决定了在渲染之前和渲染之后对附件中的数据进行何种操作。我们对于 loadOp 有以下选择：
+
+- VK_ATTACHMENT_LOAD_OP_LOAD：保留附件中的现有内容 
+- VK_ATTACHMENT_LOAD_OP_CLEAR：在开始时清除为常数的值 
+- VK_ATTACHMENT_LOAD_OP_DONT_CARE：现有内容未定义；
+
+在我们的案例中，我们将使用 clear 操作在绘制新帧之前将帧缓冲区清除为黑色。storeOp 只有两种可能：
+
+- VK_ATTACHMENT_STORE_OP_STORE：渲染的内容将被存储在内存中，稍后可以读取 
+- VK_ATTACHMENT_STORE_OP_DONT_CARE：渲染操作后，帧缓冲区的内容将是未定义的 
+
+我们对在屏幕上看到渲染的三角形感兴趣，所以我们在这里选择了 store 操作。
+
+loadOp 和 storeOp 适用于颜色和深度数据，而 stencilLoadOp / stencilStoreOp 则适用于模板数据。我们的应用程序不会对模板缓冲区做任何操作，所以加载和存储的结果无关紧要。
+
+```C++
+colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
+colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; 
+```
+
+在 Vulkan 中，纹理和帧缓冲区由具有某种像素格式的 VkImage 对象表示，然而，基于你对图像进行的操作，内存中的像素布局可能会发生变化。
+
+最常见的一些布局包括：
+
+- VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: 作为颜色附件使用的图像 
+- VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: 要在交换链中呈现的图像 
+- VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: 作为内存复制操作目标的图像 
+
+我们将在纹理章节中更深入地讨论这个主题，但现在需要知道的重要一点是，图像需要转换到适合它们将参与的下一步操作的特定布局。
+
+initialLayout 指定了渲染通道开始前图像的布局。finalLayout 指定了渲染通道结束时自动过渡到的布局。对于 initialLayout 使用 VK_IMAGE_LAYOUT_UNDEFINED 表示我们不关心图像之前的布局。这个特殊值的注意事项是，不能保证图像的内容被保留，但那没关系，因为我们无论如何都要清除它。我们希望渲染后的图像准备好通过交换链进行呈现，这就是我们使用 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR 作为 finalLayout 的原因。
+
+#### 3. Subpasses and attachment references
+
+一个单独的渲染通道可以包含多个子通道。子通道是依赖于前一次过程中帧缓冲区内容的后续渲染操作，例如，一个接一个应用的后处理效果序列。如果你将这些渲染操作分组成一个渲染通道，那么 Vulkan 能够重新排序这些操作，并节省内存带宽，可能提供更好的性能。然而，对于我们的第一个三角形，我们将坚持使用一个子通道。
+
+每个子通道都引用了我们在前面章节中使用结构描述的一个或多个附件。这些引用本身就是 VkAttachmentReference 结构体。
+
+> 在 Vulkan 中，一条渲染管线可以关联多个 render pass。一个 render pass 定义了一系列的渲染操作及其依赖关系。你可以将多个不同的渲染操作组合在一个 render pass 中以实现更有效的资源管理和可能的性能优化。但是，在每一时刻，只有一个 render pass 可以在渲染管线中激活并执行。
+>
+> 值得注意的是，虽然一个渲染管线可以关联多个 render pass，但**每次 draw call 只能在一个特定的 render pass 上下文中进行**。这意味着，你不能在一个 draw call 中同时使用两个或更多的 render pass。
+
+### 1.3.5 
+
+我们现在可以将前面章节的所有结构和对象组合起来，创建图形管线！以下是我们现在拥有的对象类型，做一个快速回顾：
+
+- 着色器阶段：定义图形管线中可编程阶段功能的着色器模块
+- 固定函数状态：定义管线中固定函数阶段的所有结构，如输入装配、光栅化器、视区和颜色混合
+- 管线布局：由着色器引用并可在绘制时更新的均匀值和推送值
+- 渲染通道：被管线阶段引用及其使用的附件
+
+这些组合完全定义了图形管线的功能，因此我们现在可以开始填充位于createGraphicsPipeline函数末尾的VkGraphicsPipelineCreateInfo结构。但在调用vkDestroyShaderModule之前，因为这些在创建过程中仍然需要使用。
+
+实际上还有两个参数：`basePipelineHandle`和`basePipelineIndex`。Vulkan允许你通过从现有的管线派生来创建一个新的图形管线。管线衍生物的理念是，当管线与现有的管线有很多功能相同时，设置管线的成本会更低，且从同一父管线切换也能更快地完成。你可以使用basePipelineHandle指定一个现有管线的句柄，或者使用basePipelineIndex通过索引引用即将创建的另一个管线。目前只有一个管线，所以我们只需指定一个空句柄和一个无效索引。只有在VkGraphicsPipelineCreateInfo的flags字段中也指定了VK_PIPELINE_CREATE_DERIVATIVE_BIT标志时，才会使用这些值。
+
+vkCreateGraphicsPipelines函数实际上比Vulkan中的常用对象创建函数有更多的参数。它被设计为接收多个VkGraphicsPipelineCreateInfo对象，并在一次调用中创建多个VkPipeline对象。
+
+我们传递了VK_NULL_HANDLE参数的第二个参数，引用了一个可选的VkPipelineCache对象。管线缓存可以被用来存储和重用跨多次调用vkCreateGraphicsPipelines，甚至跨程序执行（如果缓存被存储到文件）的管线创建相关数据。这使得在以后的时间大大加速管线创建成为可能。我们将在管线缓存章节中详细讲解这部分内容。
