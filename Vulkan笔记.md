@@ -856,3 +856,372 @@ if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
 ```
 
 在下一章节，我们将编写主循环的代码，该循环将从交换链中获取一个图像，记录并执行一个命令缓冲区，然后将完成的图像返回给交换链。
+
+### 1.4.3 Rendering and presentation
+
+#### 1. Outline of a frame
+
+从高层视角来看，Vulkan中的一帧渲染包含了一套常见的步骤：
+
+- 等待前一帧完成
+- 从交换链获取一个图像
+- 记录一个绘制场景到该图像上的命令缓冲区
+- 提交已记录的命令缓冲区
+- 呈现交换链图像
+
+尽管我们会在以后的章节中扩展绘图函数，但这是我们渲染循环的核心。
+
+#### 2. Synchronization
+
+Vulkan的一个核心设计理念是GPU上执行的同步是显式的。操作的顺序由我们使用各种同步原语来定义，这些原语告诉驱动程序我们希望事物按照什么顺序运行。这意味着许多开始在GPU上执行工作的Vulkan API调用都是异步的，这些函数将在操作完成之前返回。
+
+在本章中，我们需要明确排序的事件有很多，因为它们发生在GPU上，例如：
+
+- 从交换链获取一个图像
+- 执行将场景绘制到获得的图像上的命令
+- 将图像呈现给屏幕，将其返回到交换链
+
+这些事件都是通过单个函数调用启动的，但都是异步执行的。函数调用会在操作实际完成之前返回，执行顺序也是未定义的。这是不幸的，因为每个操作都依赖于前一个操作的完成。因此，我们需要探索可以使用哪些原语来实现所需的排序。
+
+**Semaphores 信号量**
+
+信号量用于添加队列操作之间的顺序。队列操作指的是我们提交给队列的工作，无论是在命令缓冲区中还是在稍后我们将看到的函数中。队列的例子包括图形队列和表示队列。信号量既用于在同一队列内部排序工作，也用于在不同队列之间排序。
+
+Vulkan中恰好有两种类型的信号量，二元信号量和时间轴信号量。因为只有二元信号量将在本教程中使用，我们将不讨论时间轴信号量。进一步提及信号量这个术语专指二元信号量。
+
+信号量要么处于未标记状态，要么处于标记状态。它开始时为未标记状态。我们使用信号量对队列操作进行排序的方式是，在一个队列操作中将相同的信号量作为“信号”信号量提供，在另一个队列操作中作为“等待”信号量提供。例如，假设我们有信号量S和我们想要按顺序执行的队列操作A和B。我们告诉Vulkan的是，操作A在完成执行时将“标记”信号量S，而操作B在开始执行之前将“等待”信号量S。当操作A完成时，信号量S将被标记，而操作B则不会在S被标记之前开始。在操作B开始执行之后，信号量S自动重置为未标记状态，允许它再次使用。
+
+```C++
+VkCommandBuffer A, B = ... // record command buffers
+VkSemaphore S = ... // create a semaphore
+
+// enqueue A, signal S when done - starts executing immediately
+vkQueueSubmit(work: A, signal: S, wait: None)
+
+// enqueue B, wait on S to start
+vkQueueSubmit(work: B, signal: None, wait: S)
+```
+
+注意，在此代码片段中，对vkQueueSubmit()的两个调用都立即返回 - GPU上只发生等待。CPU继续运行，不会阻塞。要使CPU等待，我们需要一个不同的同步原语，我们将现在描述。
+
+**Fence 围栏**
+
+围栏（Fence）具有类似的目的，它也是用来同步执行，但它是用来排序CPU上的执行，也就是主机。简单地说，如果主机需要知道GPU何时完成了某些工作，我们使用围栏。
+
+与信号量类似，围栏处于标记状态或未标记状态。每当我们提交需要执行的工作时，我们可以将一个围栏附加到该工作上。当工作完成时，围栏会被标记。然后，我们可以让主机等待围栏被标记，保证在主机继续之前工作已经完成。
+
+一个具体的例子是截屏。假设我们已经在GPU上完成了必要的工作。现在需要将图像从GPU传输到主机，然后将内存保存到文件中。我们有命令缓冲区A，用于执行传输和围栏F。我们提交了带有围栏F的命令缓冲区A，然后立即告诉主机等待F标记。这使得主机阻塞，直到命令缓冲区A完成执行。因此，我们可以安全地让主机将文件保存到磁盘，因为内存传输已经完成。
+
+刚刚描述的伪代码：
+
+```cpp
+VkCommandBuffer A = ... // 记录包含传输的命令缓冲区
+VkFence F = ... // 创建围栏
+
+// 入队A，立即开始工作，完成时标记F
+vkQueueSubmit(work: A, fence: F)
+
+vkWaitForFence(F) // 阻塞执行，直到A完成执行
+
+save_screenshot_to_disk() // 不能运行，直到传输完成
+```
+
+与信号量示例不同，此示例确实阻塞了主机执行。这意味着除了等待执行结束外，主机不会做任何事情。对于这种情况，我们必须确保在我们能将截图保存到磁盘之前，传输已经完成。
+
+一般来说，除非必要，最好不要阻塞主机。我们希望为GPU和主机提供有用的工作。等待围栏标记并不是有用的工作。因此，我们更喜欢使用信号量，或其他尚未涵盖的同步原语来同步我们的工作。
+
+围栏必须手动重置以将其恢复到未标记状态。这是因为围栏被用来控制主机的执行，所以主机可以决定何时重置围栏。相比之下，信号量被用来在GPU上排序工作，而不涉及主机。
+
+总的来说，信号量用于指定GPU上操作的执行顺序，而围栏用于使CPU和GPU保持同步。
+
+> 信号量（Semaphore）和围栏（Fence）都是用于同步操作的原语，但它们的使用场景和目标有所不同。
+>
+> - 信号量：主要用于GPU与GPU之间的同步。例如，在两个不同的队列操作（可能是不同的GPU任务）之间添加顺序性。当一个操作完成时，它会发出（signal）一个信号量，然后另一个操作在开始之前等待（wait）这个信号量。这样可以保证操作的执行顺序。信号量主要关注GPU上的操作顺序，对于CPU来说，基本是透明的。
+> - 围栏：主要用于CPU与GPU之间的同步。当我们提交一个任务到GPU执行，并且需要知道何时完成时，我们会使用一个围栏。任务完成后，围栏被标记为已信号状态，然后我们可以让CPU等待这个围栏变为已信号状态。这样可以确保在CPU继续之前，GPU的工作已经完成。因此，围栏主要关注主机（CPU）与设备（GPU）之间的同步。
+>
+> 总结一下，虽然这两种同步原语都可以使操作有序进行，但信号量主要用于控制在设备（GPU）内部的操作顺序，而围栏主要用于同步设备（GPU）和主机（CPU）的操作。
+
+**Choosing which?**
+
+我们有两种同步原语可用，并且方便地应用于两个需要同步的地方：交换链操作和等待前一帧完成。我们希望使用信号量进行交换链操作，因为它们在GPU上进行，因此，如果可能的话，我们不希望让主机等待。对于等待前一帧完成，我们希望使用围栏，原因正好相反，因为我们需要主机等待。这样我们就不会同时绘制超过一帧。因为我们每帧都重新记录命令缓冲区，所以在当前帧完成执行之前，我们不能记录下一帧的工作到命令缓冲区，因为我们不想在GPU使用命令缓冲区时覆盖它的当前内容。
+
+#### 3. Creating the synchronization objects
+
+我们需要一个信号量来表示已经从交换链获取了图像并准备好进行渲染，另一个信号量来表示渲染已经完成可以进行呈现，并有一个围栏来确保一次只渲染一帧。
+
+创建三个类成员来存储这些信号量对象和围栏对象：
+
+```cpp
+VkSemaphore imageAvailableSemaphore;
+VkSemaphore renderFinishedSemaphore;
+VkFence inFlightFence;
+```
+
+创建信号量，我们将添加本教程此部分的最后一个创建函数：createSyncObjects:
+
+```cpp
+void initVulkan() {
+    createInstance();
+    setupDebugMessenger();
+    createSurface();
+    pickPhysicalDevice();
+    createLogicalDevice();
+    createSwapChain();
+    createImageViews();
+    createRenderPass();
+    createGraphicsPipeline();
+    createFramebuffers();
+    createCommandPool();
+    createCommandBuffer();
+    createSyncObjects();
+}
+
+...
+
+void createSyncObjects() {
+
+}
+```
+
+创建信号量需要填写VkSemaphoreCreateInfo，但在API的当前版本中，它实际上没有除sType之外的任何必填字段：
+
+```cpp
+void createSyncObjects() {
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+}
+```
+
+未来的Vulkan API版本或扩展可能会为flags和pNext参数添加功能，就像其他结构体一样。
+
+创建围栏需要填写VkFenceCreateInfo：
+
+```cpp
+VkFenceCreateInfo fenceInfo{};
+fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+```
+
+使用vkCreateSemaphore & vkCreateFence按照熟悉的模式创建信号量和围栏：
+
+```cpp
+if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+    vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+    vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+    throw std::runtime_error("failed to create semaphores!");
+}
+```
+
+在程序结束时，所有命令都已完成并且不再需要同步时，应清理信号量和围栏：
+
+```cpp
+void cleanup() {
+    vkDestroySemaphore(device, imageAvailableSemaphore, nullptr);
+    vkDestroySemaphore(device, renderFinishedSemaphore, nullptr);
+    vkDestroyFence(device, inFlightFence, nullptr);
+}
+```
+
+接下来是主要的绘图函数！
+
+#### 4. Waiting for the previous frame
+
+在帧开始时，我们需要**等待前一帧完成**，以便命令缓冲和信号量可以使用。为此，我们调用vkWaitForFences：
+
+```cpp
+void drawFrame() {
+    vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+}
+```
+
+vkWaitForFences函数接受一个围栏数组，并在主机上等待任何或所有围栏被标记为已完成状态后才返回。这里我们传递的VK_TRUE表示我们想要等待所有围栏，但在单个围栏的情况下并不重要。此函数还有一个超时参数，我们将其设置为64位无符号整数的最大值UINT64_MAX，这实际上禁用了超时。
+
+等待之后，我们需要手动用vkResetFences调用将围栏复位到未标记状态：
+
+```cpp
+vkResetFences(device, 1, &inFlightFence);
+```
+
+在我们可以继续之前，我们的设计中出现了一个小问题。在第一帧我们调用drawFrame()，它立即等待inFlightFence被标记。只有在一帧渲染完成后，inFlightFence才会被标记，但由于这是第一帧，所以没有前一帧可以标记围栏！因此，vkWaitForFences()无限阻塞，等待永远不会发生的事情。
+
+对于这个难题，有许多解决方案，API内置了一个巧妙的应对方法。创建一个已经标记为完成的围栏，这样第一次调用vkWaitForFences()就会立即返回，因为围栏已经被标记。
+
+为此，我们在VkFenceCreateInfo中添加VK_FENCE_CREATE_SIGNALED_BIT标志：
+
+```cpp
+void createSyncObjects() {
+    ...
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    ...
+}
+```
+
+#### 5. Acquiring an image from the swap chain
+
+在drawFrame函数中，我们需要做的下一件事就是从交换链获取图像。回想一下，交换链是一个扩展特性，所以我们必须使用带有vk*KHR命名约定的函数：
+
+```cpp
+void drawFrame() {
+    uint32_t imageIndex;
+    vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+}
+```
+
+vkAcquireNextImageKHR的前两个参数是逻辑设备和我们希望获取图像的交换链。第三个参数指定一个纳秒级的超时时间，以便图像变得可用。使用64位无符号整数的最大值意味着我们有效地禁用了超时。
+
+接下来的两个参数指定了当显示引擎完成图像使用时，将被标记的同步对象。那是我们可以开始绘制图像的时间点。这里可以指定信号量、围栏或者两者都有。我们将在这里使用我们的imageAvailableSemaphore。
+
+最后一个参数指定一个变量来输出已经可用的交换链图像的索引。该索引是指我们swapChainImages数组中的VkImage。我们将使用该索引来选择VkFramebuffer。
+
+#### 6. Recording the command buffer
+
+有了指定要使用的交换链图像的imageIndex，我们现在可以记录命令缓存。首先，我们在命令缓存上调用vkResetCommandBuffer，以确保其能够被记录。
+
+```cpp
+vkResetCommandBuffer(commandBuffer, 0);
+```
+
+vkResetCommandBuffer的第二个参数是一个VkCommandBufferResetFlagBits标志。由于我们不想做任何特殊的事情，我们将其保留为0。
+
+现在调用函数recordCommandBuffer来记录我们想执行的命令。
+
+```cpp
+recordCommandBuffer(commandBuffer, imageIndex);
+```
+
+有了完全记录的命令缓存，我们现在可以提交它。
+
+#### 7. Submitting the command buffer
+
+队列提交和同步通过VkSubmitInfo结构中的参数进行配置。
+
+```cpp
+VkSubmitInfo submitInfo{};
+submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+VkSemaphore waitSemaphores[] = {imageAvailableSemaphore};
+VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+submitInfo.waitSemaphoreCount = 1;
+submitInfo.pWaitSemaphores = waitSemaphores;
+submitInfo.pWaitDstStageMask = waitStages;
+```
+前三个参数指定在执行开始之前应等待哪些信号量以及在管道的哪个阶段等待。我们希望在图像可用之前等待写入颜色，所以我们指定写入颜色附件的图形管道的阶段。这意味着理论上，实现可以在图像还不可用时就开始执行我们的顶点着色器等任务。waitStages数组中的每个条目对应pWaitSemaphores中具有相同索引的信号量。
+
+```cpp
+submitInfo.commandBufferCount = 1;
+submitInfo.pCommandBuffers = &commandBuffer;
+```
+下两个参数指定实际提交执行的命令缓冲区。我们直接提交我们拥有的单个命令缓冲区。
+
+```cpp
+VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
+submitInfo.signalSemaphoreCount = 1;
+submitInfo.pSignalSemaphores = signalSemaphores;
+```
+signalSemaphoreCount和pSignalSemaphores参数指定了命令缓冲区完成执行后要发出信号的信号量。在我们的情况下，我们使用renderFinishedSemaphore用于此目的。
+
+```cpp
+if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+    throw std::runtime_error("failed to submit draw command buffer!");
+}
+```
+我们现在可以使用vkQueueSubmit将命令缓冲区提交给图形队列。该函数将一组VkSubmitInfo结构作为参数，当工作负载更大时，这种方式更高效。最后一个参数引用一个可选围栏，在命令缓冲区完成执行时会发出信号。这使我们能知道何时可以安全地重复使用命令缓冲区，因此我们想要将其赋值给inFlightFence。现在在下一帧中，CPU会等待此命令缓冲区完成执行后再记录新的命令进入其中。
+
+#### 8. Subpass dependencies
+
+请记住，渲染过程中的子通道会自动处理图像布局转换。这些转换由子通道依赖来控制，这些依赖指定了子通道之间的内存和执行依赖关系。我们现在只有一个子通道，但是在这个子通道之前和之后的操作也被视为隐式的"子通道"。
+
+有两个内置的依赖关系负责在渲染过程开始和结束时的转换，但前者并未在正确的时间发生。它假设转换发生在管线的开始，但我们在那个时候还没有获取到图像！处理这个问题有两种方式。我们可以将imageAvailableSemaphore的waitStages更改为VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT来确保在图像可用之前不开始渲染过程，或者我们可以让渲染过程等待VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT阶段。我决定在这里使用第二种选项，因为这是一个很好的理由去查看子通道依赖以及他们如何工作。
+
+子通道依赖项在VkSubpassDependency结构体中指定。去createRenderPass函数并添加一个：
+
+```cpp
+VkSubpassDependency dependency{};
+dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+dependency.dstSubpass = 0;
+```
+前两个字段指定了依赖关系和依赖子通道的索引。特殊值VK_SUBPASS_EXTERNAL根据其在srcSubpass或dstSubpass中的指定，分别指代渲染过程之前或之后的隐式子通道。索引0则指我们的子通道，它是唯一且排在首位的子通道。dstSubpass必须始终高于srcSubpass，以防止依赖图中的循环（除非其中一个子通道是VK_SUBPASS_EXTERNAL）。
+
+```cpp
+dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+dependency.srcAccessMask = 0;
+```
+接下来的两个字段指定了要等待的操作以及这些操作发生的阶段。我们需要等待交换链完成从图像中读取的操作，然后我们才能访问它。通过等待颜色附件输出阶段本身，可以实现这一点。
+
+```cpp
+dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+```
+应该等待这个阶段的操作处于颜色附件阶段，并涉及写入颜色附件。这些设置将防止在实际需要（并允许）时转换发生：当我们希望开始向其写入颜色时。
+
+```cpp
+renderPassInfo.dependencyCount = 1;
+renderPassInfo.pDependencies = &dependency;
+```
+VkRenderPassCreateInfo结构体有两个字段用于指定依赖项数组。
+
+#### 9. Presentation
+
+绘制帧的最后一步是将结果提交回交换链，以便它最终显示在屏幕上。展示是通过drawFrame函数末尾的VkPresentInfoKHR结构进行配置的。
+
+```cpp
+VkPresentInfoKHR presentInfo{};
+presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+presentInfo.waitSemaphoreCount = 1;
+presentInfo.pWaitSemaphores = signalSemaphores;
+```
+前两个参数指定在展示可以发生之前要等待的信号量，就像VkSubmitInfo一样。由于我们想等待命令缓冲区完成执行，从而绘制出我们的三角形，我们接收将被信号化并等待它们的信号量，因此我们使用signalSemaphores。
+
+```cpp
+VkSwapchainKHR swapChains[] = {swapChain};
+presentInfo.swapchainCount = 1;
+presentInfo.pSwapchains = swapChains;
+presentInfo.pImageIndices = &imageIndex;
+```
+接下来的两个参数指定要向其展示图像的交换链和每个交换链的图像索引。这几乎总是单一的。
+
+```cpp
+presentInfo.pResults = nullptr; // Optional
+```
+还有一个叫做pResults的可选参数。它允许你指定一个VkResult值数组，用于检查每个独立的交换链是否成功展示。如果你只使用一个交换链，那么这不是必需的，因为你可以简单地使用呈现函数的返回值。
+
+```cpp
+vkQueuePresentKHR(presentQueue, &presentInfo);
+```
+vkQueuePresentKHR函数提交了向交换链展示一个图像的请求。我们将在下一章为vkAcquireNextImageKHR和vkQueuePresentKHR添加错误处理，因为他们的失败并不一定意味着程序应该终止，与我们迄今为止看到的函数不同。
+
+如果你到目前为止做得都正确，那么当你运行你的程序时，你应该可以看到以下内容：
+
+![img](https://vulkan-tutorial.com/images/triangle.png)
+
+这个彩色的三角形可能看起来和你在图形教程中看到的有些不同。这是因为本教程让着色器在线性颜色空间中插值，并在之后转换为sRGB颜色空间。请参见这篇博客文章，以了解这两者之间的区别。
+
+太棒了！不幸的是，你会发现当启用验证层时，程序在你关闭它的时候就崩溃了。debugCallback打印到终端的消息告诉我们原因：
+
+![img](https://vulkan-tutorial.com/images/semaphore_in_use.png)
+
+请记住，drawFrame中的所有操作都是异步进行的。这意味着当我们退出mainLoop的循环时，绘图和展示操作可能仍在进行中。在此过程中清理资源是个坏主意。
+
+要解决这个问题，我们应该等待逻辑设备完成操作，然后退出mainLoop并销毁窗口：
+
+```cpp
+void mainLoop() {
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+        drawFrame();
+    }
+
+    vkDeviceWaitIdle(device);
+}
+```
+你也可以等待特定命令队列中的操作完成，使用vkQueueWaitIdle。这些函数可以作为一种非常基础的方式来执行同步。你会发现当关闭窗口时，程序现在没有问题地退出了。
+
+#### 10. Conclusion
+
+900多行代码后，我们终于看到了画面弹出在屏幕上！启动一个Vulkan程序确实需要大量的工作，但需要取走的信息是，通过其明确性，Vulkan给予你巨大的控制能力。我建议你现在花些时间重新阅读代码，并建立一个关于程序中所有Vulkan对象的目的以及它们如何相互关联的心理模型。我们将在此基础上扩展程序的功能。
+
+下一章将扩展渲染循环，以处理多帧。

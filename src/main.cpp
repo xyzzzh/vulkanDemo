@@ -138,6 +138,11 @@ class HelloTriangleApplication {
 	// Command buffer
 	VkCommandBuffer m_CommandBuffer;
 
+	// store semaphore object and fence object
+	VkSemaphore m_ImageAvailableSemaphore;
+	VkSemaphore m_RenderFinishedSemaphore;
+	VkFence m_InFlightFence;
+
 	void initWindow() {
 		// 初始化GLFW库
 		glfwInit();
@@ -165,18 +170,32 @@ class HelloTriangleApplication {
 		createFramebuffers();
 		createCommandPool();
 		createCommandBuffer();
+		createSyncObjects();
 	}
 
 	void mainLoop() {
 		while (!glfwWindowShouldClose(m_Window)) {
 			glfwPollEvents();
+			drawFrame();
 		}
+
+		vkDeviceWaitIdle(m_Device);
 	}
 
 	void cleanUp() {
+		vkDestroySemaphore(m_Device, m_ImageAvailableSemaphore, nullptr);
+		vkDestroySemaphore(m_Device, m_RenderFinishedSemaphore, nullptr);
+		vkDestroyFence(m_Device, m_InFlightFence, nullptr);
+
+		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
+		for (auto framebuffer : m_SwapChainFramebuffers) {
+			vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
+		}
+
 		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
 		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+
 		for (auto imageView : swapChainImageViews) {
 			vkDestroyImageView(m_Device, imageView, nullptr);
 		}
@@ -1003,6 +1022,14 @@ class HelloTriangleApplication {
 		subpass.pColorAttachments =
 		    &colorAttachmentRef; // 设置颜色附件数组的指针为colorAttachmentRef
 
+		VkSubpassDependency dependency{};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass = 0;
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
 		// 创建渲染通道的信息
 		VkRenderPassCreateInfo renderPassInfo{};
 		renderPassInfo.sType =
@@ -1012,6 +1039,8 @@ class HelloTriangleApplication {
 		    &colorAttachment; // 设置附件描述符的指针为colorAttachment
 		renderPassInfo.subpassCount = 1; // 设置子通道计数为1
 		renderPassInfo.pSubpasses = &subpass; // 设置子通道描述符的指针为subpass
+		renderPassInfo.dependencyCount = 1;
+		renderPassInfo.pDependencies = &dependency;
 
 		// 如果不能成功创建渲染通道，则抛出运行时错误
 		if (vkCreateRenderPass(m_Device, &renderPassInfo, nullptr,
@@ -1119,6 +1148,84 @@ class HelloTriangleApplication {
 		vkCmdEndRenderPass(commandBuffer);
 		if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to record command buffer!");
+		}
+	}
+
+	// draw frame
+	void drawFrame() {
+		// 等待上一个帧结束
+		vkWaitForFences(m_Device, 1, &m_InFlightFence, VK_TRUE, UINT64_MAX);
+		// 重设用于同步的栅栏
+		vkResetFences(m_Device, 1, &m_InFlightFence);
+
+		uint32_t imageIndex;
+		// 获取交换链中的下一个图像
+		vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX,
+		                      m_ImageAvailableSemaphore, VK_NULL_HANDLE,
+		                      &imageIndex);
+
+		// 重设命令缓冲
+		vkResetCommandBuffer(m_CommandBuffer, 0);
+		// 记录需要执行的命令
+		recordCommandBuffer(m_CommandBuffer, imageIndex);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+		// 等待图像可用信号量
+		VkSemaphore waitSemaphores[] = {m_ImageAvailableSemaphore};
+		VkPipelineStageFlags waitStages[] = {
+		    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+		submitInfo.waitSemaphoreCount = 1;
+		submitInfo.pWaitSemaphores = waitSemaphores;
+		submitInfo.pWaitDstStageMask = waitStages;
+		// 指定提交到队列的命令缓冲
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &m_CommandBuffer;
+
+		// 渲染完成信号量
+		VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphore};
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = signalSemaphores;
+
+		// 提交命令缓冲到图形队列
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, m_InFlightFence) !=
+		    VK_SUCCESS) {
+			throw std::runtime_error("Failed to submit draw command buffer!");
+		}
+
+		VkPresentInfoKHR presentInfo{};
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		// 等待渲染完成信号量
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores = signalSemaphores;
+
+		// 交换链
+		VkSwapchainKHR swapChains[] = {m_SwapChain};
+		presentInfo.swapchainCount = 1;
+		presentInfo.pSwapchains = swapChains;
+		// 指定呈现的图像索引
+		presentInfo.pImageIndices = &imageIndex;
+		presentInfo.pResults = nullptr;
+
+		// 将图片提交到显示队列进行显示
+		vkQueuePresentKHR(presentQueue, &presentInfo);
+	}
+
+	void createSyncObjects() {
+		VkSemaphoreCreateInfo semaphoreInfo{};
+		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		VkFenceCreateInfo fenceInfo{};
+		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+		if (vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr,
+		                      &m_ImageAvailableSemaphore) != VK_SUCCESS ||
+		    vkCreateSemaphore(m_Device, &semaphoreInfo, nullptr,
+		                      &m_RenderFinishedSemaphore) != VK_SUCCESS ||
+		    vkCreateFence(m_Device, &fenceInfo, nullptr, &m_InFlightFence) !=
+		        VK_SUCCESS) {
+			throw std::runtime_error("failed to create semaphores!");
 		}
 	}
 };
