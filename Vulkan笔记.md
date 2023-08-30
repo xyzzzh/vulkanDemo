@@ -1225,3 +1225,133 @@ void mainLoop() {
 900多行代码后，我们终于看到了画面弹出在屏幕上！启动一个Vulkan程序确实需要大量的工作，但需要取走的信息是，通过其明确性，Vulkan给予你巨大的控制能力。我建议你现在花些时间重新阅读代码，并建立一个关于程序中所有Vulkan对象的目的以及它们如何相互关联的心理模型。我们将在此基础上扩展程序的功能。
 
 下一章将扩展渲染循环，以处理多帧。
+
+### 1.4.4 Frames in flight
+
+目前我们的渲染循环有一个明显的缺陷。在渲染下一帧之前，我们需要等待上一帧完成，这导致了主机的不必要空闲。
+
+解决这个问题的方法是允许同时有多个帧在飞行中，也就是说，允许一个帧的渲染不干扰下一个帧的记录。那么我们如何做到这一点呢？任何在渲染过程中被访问和修改的资源都必须被复制。因此，我们需要多个命令缓冲区、信号量和栅栏。在后续章节中，我们还会添加其他资源的多个实例，所以我们会再次看到这个概念。
+
+首先，在程序的顶部添加一个常数，定义应该同时处理多少帧：
+
+```c++
+const int MAX_FRAMES_IN_FLIGHT = 2;
+```
+我们选择数字2，因为我们不希望CPU超前于GPU太多。有2个飞行中的帧时，CPU和GPU可以同时进行各自的任务。如果CPU提前结束，它将等待GPU完成渲染，然后提交更多工作。对于3个或更多的飞行中的帧，CPU可能超过GPU，增加了帧延迟。通常，额外的延迟是不希望的。但是，让应用程序控制飞行中的帧数量是Vulkan明确性的另一个例子。
+
+每一帧都应该有自己的命令缓冲区、信号量集和栅栏。重命名并改变它们为对象的std::vectors：
+
+```c++
+std::vector<VkCommandBuffer> commandBuffers;
+
+...
+
+std::vector<VkSemaphore> imageAvailableSemaphores;
+std::vector<VkSemaphore> renderFinishedSemaphores;
+std::vector<VkFence> inFlightFences;
+```
+接着，我们需要创建多个命令缓冲区。将createCommandBuffer重命名为createCommandBuffers。接下来我们需要调整命令缓冲区向量的大小为MAX_FRAMES_IN_FLIGHT的大小，改变VkCommandBufferAllocateInfo使其包含那么多命令缓冲区，然后改变目标为我们的命令缓冲区向量：
+
+```c++
+void createCommandBuffers() {
+    commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    ...
+    allocInfo.commandBufferCount = (uint32_t) commandBuffers.size();
+
+    if (vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
+        throw std::runtime_error("failed to allocate command buffers!");
+    }
+}
+```
+createSyncObjects函数应被改变以创建所有的对象：
+
+```c++
+void createSyncObjects() {
+    imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+    VkSemaphoreCreateInfo semaphoreInfo{};
+    semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+            vkCreateSemaphore(device, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+            vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
+
+            throw std::runtime_error("failed to create synchronization objects for a frame!");
+        }
+    }
+}
+```
+同样的，它们也应该全部被清理：
+
+```c++
+void cleanup() {
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+        vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+        vkDestroyFence(device, inFlightFences[i], nullptr);
+    }
+
+    ...
+}
+```
+记住，因为当我们释放命令池时，命令缓冲区会为我们自动释放，所以我们没有额外的命令缓冲区清理工作要做。
+
+为了在每个帧使用正确的对象，我们需要跟踪当前的帧。我们将使用一个帧索引来实现这一点：
+
+```c++
+uint32_t currentFrame = 0;
+```
+现在可以修改drawFrame函数，使用正确的对象：
+
+```c++
+void drawFrame() {
+    vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &inFlightFences[currentFrame]);
+
+    vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+    ...
+
+    vkResetCommandBuffer(commandBuffers[currentFrame],  0);
+    recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+
+    ...
+
+    submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
+
+    ...
+
+    VkSemaphore waitSemaphores[] = {imageAvailableSemaphores[currentFrame]};
+
+    ...
+
+    VkSemaphore signalSemaphores[] = {renderFinishedSemaphores[currentFrame]};
+
+    ...
+
+    if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
+}
+```
+当然，我们不应该忘记每次都进入下一个帧：
+
+```c++
+void drawFrame() {
+    ...
+
+    currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+}
+```
+通过使用模运算符（%），我们确保在每个MAX_FRAMES_IN_FLIGHT队列帧之后帧索引都会循环。
+
+我们现在已经实现了所有需要的同步，以确保队列中的工作帧不超过MAX_FRAMES_IN_FLIGHT，并且这些帧不会相互干扰。请注意，像最后的清理这样的代码其他部分，依赖于更粗糙的同步，如vkDeviceWaitIdle，是没问题的。你应该根据性能需求决定使用哪种方法。
+
+要通过例子了解更多关于同步的信息，请查看Khronos的这个详尽的概述。
+
+在下一章中，我们将处理一个规范的Vulkan程序所需的另一个小事情。
