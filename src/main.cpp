@@ -146,18 +146,18 @@ class HelloTriangleApplication {
 
 	uint32_t currentFrame = 0;
 
+	bool framebufferResized = false;
+
 	void initWindow() {
 		// 初始化GLFW库
 		glfwInit();
 
 		// 因为GLFW最初是设计来创建OpenGL上下文的，所以我们需要告诉它不要创建OpenGL上下文
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-
-		// 禁用窗口调整大小的功能
-		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-
 		// 创建一个新的GLFW窗口
 		m_Window = glfwCreateWindow(WIDTH, HEIGHT, "vulkan", nullptr, nullptr);
+		glfwSetWindowUserPointer(m_Window, this);
+		glfwSetFramebufferSizeCallback(m_Window, framebufferResizeCallback);
 	}
 
 	void initVulkan() {
@@ -186,6 +186,13 @@ class HelloTriangleApplication {
 	}
 
 	void cleanUp() {
+		cleanupSwapChain();
+
+		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
+		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
+
+		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			vkDestroySemaphore(m_Device, m_ImageAvailableSemaphores[i],
 			                   nullptr);
@@ -195,18 +202,7 @@ class HelloTriangleApplication {
 		}
 
 		vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
-		for (auto framebuffer : m_SwapChainFramebuffers) {
-			vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
-		}
 
-		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
-		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
-		vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
-
-		for (auto imageView : swapChainImageViews) {
-			vkDestroyImageView(m_Device, imageView, nullptr);
-		}
-		vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
 		// Logical devices don't interact directly with instances, which is why
 		// it's not included as a parameter.
 		vkDestroyDevice(m_Device, nullptr);
@@ -1165,14 +1161,22 @@ class HelloTriangleApplication {
 		// 等待上一个帧结束
 		vkWaitForFences(m_Device, 1, &m_InFlightFences[currentFrame], VK_TRUE,
 		                UINT64_MAX);
-		// 重设用于同步的栅栏
-		vkResetFences(m_Device, 1, &m_InFlightFences[currentFrame]);
 
 		uint32_t imageIndex;
 		// 获取交换链中的下一个图像
-		vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX,
-		                      m_ImageAvailableSemaphores[currentFrame],
-		                      VK_NULL_HANDLE, &imageIndex);
+		VkResult result =
+		    vkAcquireNextImageKHR(m_Device, m_SwapChain, UINT64_MAX,
+		                          m_ImageAvailableSemaphores[currentFrame],
+		                          VK_NULL_HANDLE, &imageIndex);
+
+		if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+			recreateSwapChain();
+			return;
+		} else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+			throw std::runtime_error("Failed to acquire swap chain image!");
+		}
+		// 重设用于同步的栅栏
+		vkResetFences(m_Device, 1, &m_InFlightFences[currentFrame]);
 
 		// 重设命令缓冲
 		vkResetCommandBuffer(m_CommandBuffers[currentFrame], 0);
@@ -1221,8 +1225,13 @@ class HelloTriangleApplication {
 		presentInfo.pResults = nullptr;
 
 		// 将图片提交到显示队列进行显示
-		vkQueuePresentKHR(presentQueue, &presentInfo);
+		result = vkQueuePresentKHR(presentQueue, &presentInfo);
 
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+			recreateSwapChain();
+		} else if (result != VK_SUCCESS) {
+			throw std::runtime_error("Failed to present swap chain image!");
+		}
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
@@ -1233,7 +1242,7 @@ class HelloTriangleApplication {
 
 		VkSemaphoreCreateInfo semaphoreInfo{};
 		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-		
+
 		VkFenceCreateInfo fenceInfo{};
 		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -1250,6 +1259,43 @@ class HelloTriangleApplication {
 				throw std::runtime_error("failed to create semaphores!");
 			}
 		}
+	}
+
+	// swap chain recreation
+	void cleanupSwapChain() {
+		for (size_t i = 0; i < m_SwapChainFramebuffers.size(); i++) {
+			vkDestroyFramebuffer(m_Device, m_SwapChainFramebuffers[i], nullptr);
+		}
+
+		for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+			vkDestroyImageView(m_Device, swapChainImageViews[i], nullptr);
+		}
+
+		vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
+	}
+
+	void recreateSwapChain() {
+		int width = 0, height = 0;
+		glfwGetFramebufferSize(m_Window, &width, &height);
+		while (width == 0 || height == 0) {
+			glfwGetFramebufferSize(m_Window, &width, &height);
+			glfwWaitEvents();
+		}
+
+		vkDeviceWaitIdle(m_Device);
+
+		cleanupSwapChain();
+
+		createSwapChain();
+		createImageViews();
+		createFramebuffers();
+	}
+
+	static void framebufferResizeCallback(GLFWwindow *window, int width,
+	                                      int height) {
+		auto app = reinterpret_cast<HelloTriangleApplication *>(
+		    glfwGetWindowUserPointer(window));
+		app->framebufferResized = true;
 	}
 };
 

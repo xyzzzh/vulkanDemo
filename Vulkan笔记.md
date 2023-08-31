@@ -1,7 +1,5 @@
 [TOC]
 
-
-
 # 1. Drawing a triangle
 
 ## 1.1 Setup
@@ -126,13 +124,13 @@ void createSurface() {
 
 - **VK_PRESENT_MODE_FIFO_KHR**
   ：交换链是一个队列，当显示刷新时，显示器从队列前面取出一个图像，程序在队列后面插入渲染的图像。如果队列已满，那么程序必须等待。这与现代游戏中找到的垂直同步最相似。显示刷新的那一刻被称为**“
-  
+
   **垂直空白**”**。**
 - **VK_PRESENT_MODE_FIFO_RELAXED_KHR**：如果应用程序延迟，并且在最后一个垂直空白时队列为空，那么此模式只与前一个模式有所不同。而不是等待下一个垂直空白，图像在最终到达时立即传输。这可能会导致可见的撕裂。
 
 - **VK_PRESENT_MODE_MAILBOX_KHR**
   ：这是第二种模式的另一种变体。当队列已满时，而不是阻塞应用程序，已经排队的图像简单地被新的图像替换。此模式可用于尽可能快地渲染帧，同时仍然避免撕裂，导致比标准垂直同步更少的延迟问题。这通常被称为**“
-  
+
   **三重缓冲**”**，尽管存在三个缓冲区并不一定意味着帧率是解锁的。
 
 ```C++
@@ -184,7 +182,8 @@ VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
 - `VK_SHARING_MODE_EXCLUSIVE`：一个图像在一次只被一个队列家族拥有，必须显式转移所有权才能在另一个队列家族中使用。此选项提供了最佳性能。
 - `VK_SHARING_MODE_CONCURRENT`：图像可在多个队列家族之间使用，无需显式所有权转移。
 
-如果队列家族有差异，那么在本教程中我们将使用并发模式，以避免做所有权章节，因为这涉及到一些概念，更好在后面的时间解释。并发模式要求你提前指定哪些队列家族之间将共享所有权，使用参数`queueFamilyIndexCount`和`pQueueFamilyIndices`进行指定。如果图形队列家族和显示队列家族是相同的（这在大多数硬件上都会是这种情况），那么我们应该坚持使用独占模式，因为并发模式要求你指定至少两个不同的队列家族。
+如果队列家族有差异，那么在本教程中我们将使用并发模式，以避免做所有权章节，因为这涉及到一些概念，更好在后面的时间解释。并发模式要求你提前指定哪些队列家族之间将共享所有权，使用参数`queueFamilyIndexCount`
+和`pQueueFamilyIndices`进行指定。如果图形队列家族和显示队列家族是相同的（这在大多数硬件上都会是这种情况），那么我们应该坚持使用独占模式，因为并发模式要求你指定至少两个不同的队列家族。
 
 > **队列家族与交换链**
 >
@@ -196,7 +195,10 @@ VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
 >
 > 队列家族和交换链之间的关系就是：队列家族负责对交换链中的图像进行处理。具体来说，图形队列家族可能会负责绘制图像，然后将图像数据提交给交换链；然后，显示队列家族会从交换链中取出图像并将其送入显示设备。
 >
-> 同时，在Vulkan中，图像的所有权需要在不同的队列家族之间转移。这就引出了你之前提到的两种模式：`VK_SHARING_MODE_EXCLUSIVE`和`VK_SHARING_MODE_CONCURRENT`。使用独占模式时，一个图像在一次只被一个队列家族拥有，如果想要在另一个队列家族中使用，必须显式转移所有权；而使用并发模式时，图像可以在多个队列家族之间使用，无需显式转移所有权。所以，选择何种模式取决于你的应用是否需要在多个队列家族之间共享交换链图像。
+> 同时，在Vulkan中，图像的所有权需要在不同的队列家族之间转移。这就引出了你之前提到的两种模式：`VK_SHARING_MODE_EXCLUSIVE`
+> 和`VK_SHARING_MODE_CONCURRENT`
+>
+。使用独占模式时，一个图像在一次只被一个队列家族拥有，如果想要在另一个队列家族中使用，必须显式转移所有权；而使用并发模式时，图像可以在多个队列家族之间使用，无需显式转移所有权。所以，选择何种模式取决于你的应用是否需要在多个队列家族之间共享交换链图像。
 
 > **"图形队列家族和显示队列家族是相同或者不同"，是什么意思？**
 >
@@ -205,20 +207,27 @@ VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
 > - **图形队列家族(Graphics Queue Family)**：这种队列家族主要负责图形渲染操作，例如绘制三维对象、应用纹理等。
 > - **显示队列家族(Presentation Queue Family)**：这种队列家族负责将图像从交换链传递到显示设备上。
 >
-> 通常，一个物理设备(如GPU)可以有多个队列家族，每个都支持不同类型的操作。不过，并非所有设备上的所有队列家族都必须是不同的。在某些硬件上，图形和显示操作可能由同一个队列家族处理，这意味着图形队列家族和显示队列家族是相同的。然而，在其他硬件上，图形和显示操作可能由不同的队列家族处理，即图形队列家族和显示队列家族是不同的。
+> 通常，一个物理设备(如GPU)
 >
-> 所以，"图形队列家族和显示队列家族是相同或者不同"，实际上是指示了你的应用程序在处理图形渲染和图像显示时是否需要切换队列家族。如果它们是相同的，那么你的应用程序可以简化逻辑，使得所有的图形和显示任务都在同一个队列家族中进行。如果它们不同，则需要适当地处理队列家族之间的切换和资源所有权转移。
+可以有多个队列家族，每个都支持不同类型的操作。不过，并非所有设备上的所有队列家族都必须是不同的。在某些硬件上，图形和显示操作可能由同一个队列家族处理，这意味着图形队列家族和显示队列家族是相同的。然而，在其他硬件上，图形和显示操作可能由不同的队列家族处理，即图形队列家族和显示队列家族是不同的。
+>
+> 所以，"图形队列家族和显示队列家族是相同或者不同"
+>
+，实际上是指示了你的应用程序在处理图形渲染和图像显示时是否需要切换队列家族。如果它们是相同的，那么你的应用程序可以简化逻辑，使得所有的图形和显示任务都在同一个队列家族中进行。如果它们不同，则需要适当地处理队列家族之间的切换和资源所有权转移。
 
 ### 1.2.3 Image View
 
-要在渲染管线中使用任何 VkImage，包括交换链中的那些，我们必须创建一个 VkImageView 对象。图像视图Image View实质上就是图像的一个视窗。它描述了如何访问图像以及访问图像的哪个部分，例如，是否应将其视为没有任何 mipmap 层级的2D纹理深度纹理。
+要在渲染管线中使用任何 VkImage，包括交换链中的那些，我们必须创建一个 VkImageView 对象。图像视图Image
+View实质上就是图像的一个视窗。它描述了如何访问图像以及访问图像的哪个部分，例如，是否应将其视为没有任何 mipmap 层级的2D纹理深度纹理。
 
-每个 VkImage 通常都需要一个对应的 VkImageView。VkImageView 本质上是 VkImage 的一个视图，在渲染过程中它描述了如何访问图像以及访问图像的哪个部分。这使得你可以选择图像的一部分进行操作，或者指定图像的特定用途（例如颜色附件、深度附件等）。这种灵活性使得你在不同的渲染阶段可以以不同的方式查看和使用同一 VkImage。
+每个 VkImage 通常都需要一个对应的 VkImageView。VkImageView 本质上是 VkImage
+的一个视图，在渲染过程中它描述了如何访问图像以及访问图像的哪个部分。这使得你可以选择图像的一部分进行操作，或者指定图像的特定用途（例如颜色附件、深度附件等）。这种灵活性使得你在不同的渲染阶段可以以不同的方式查看和使用同一
+VkImage。
 
 ```C++
 // Image View
 	void createImageViews() {
-		swapChainImageViews.resize(swapChainImages.size());
+		m_SwapChainImageViews.resize(swapChainImages.size());
 		for (size_t i = 0; i < swapChainImages.size(); i++) {
 			VkImageViewCreateInfo createInfo;
 			createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -239,30 +248,33 @@ VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
 			createInfo.subresourceRange.baseArrayLayer = 0;
 			createInfo.subresourceRange.layerCount = 1;
 			if (vkCreateImageView(m_Device, &createInfo, nullptr,
-			                      &swapChainImageViews[i]) != VK_SUCCESS) {
+			                      &m_SwapChainImageViews[i]) != VK_SUCCESS) {
 				throw std::runtime_error("Failed to create image views!");
 			}
 		}
 	}
 ```
 
-
-
->**VkImageView 与 Surface**
+> **VkImageView 与 Surface**
 >
 >`VkImageView`和`Surface`都是Vulkan中的重要概念，它们各自在图像渲染流程中扮演着重要角色。然而，这两者的功能和使用场景有明显的差异。
 >
 >### VkImageView
 >
->`VkImageView`是对`VkImage`对象的一个视图或者子集。这个视图定义了如何访问图像以及如何将图像解释为特定的像素格式。例如，你可以创建一个视图来显示图像的一个子集、特定的层级、特定的色彩通道等等。`VkImageView`主要用于图像资源的读写操作，比如纹理采样、附件读写等。
+>`VkImageView`是对`VkImage`
+> 对象的一个视图或者子集。这个视图定义了如何访问图像以及如何将图像解释为特定的像素格式。例如，你可以创建一个视图来显示图像的一个子集、特定的层级、特定的色彩通道等等。`VkImageView`
+> 主要用于图像资源的读写操作，比如纹理采样、附件读写等。
 >
 >### Surface
 >
->`Surface`在Vulkan中代表一个平台相关的窗口或者界面，用于显示渲染后的图像。无论你在哪种平台(Windows，Linux，Android等)上运行Vulkan程序，`Surface`都是与特定平台窗口系统交互的桥梁，用于将Vulkan图像内容展示到屏幕上。
+>`Surface`在Vulkan中代表一个平台相关的窗口或者界面，用于显示渲染后的图像。无论你在哪种平台(Windows，Linux，Android等)
+> 上运行Vulkan程序，`Surface`都是与特定平台窗口系统交互的桥梁，用于将Vulkan图像内容展示到屏幕上。
 >
 >### 关系
 >
->`VkImageView`和`Surface`之间的关系可以简单概括为：`VkImageView`常用于管理和使用图像数据，而`Surface`则用于将这些图像数据显示到用户的屏幕上。当我们完成一次Vulkan的渲染操作时，必须先通过`VkImageView`将图像资源呈现到一个 `VkFramebuffer`, 然后再通过`Surface`将它们呈现到应用程序窗口中。
+>`VkImageView`和`Surface`之间的关系可以简单概括为：`VkImageView`常用于管理和使用图像数据，而`Surface`
+> 则用于将这些图像数据显示到用户的屏幕上。当我们完成一次Vulkan的渲染操作时，必须先通过`VkImageView`
+> 将图像资源呈现到一个 `VkFramebuffer`, 然后再通过`Surface`将它们呈现到应用程序窗口中。
 >
 >换句话说，`VkImageView`与`Surface`一起工作，以实现图像的创建、处理和最终的显示。
 >
@@ -280,7 +292,8 @@ VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
 
 3. 曲面细分着色器允许你根据某些规则对几何体进行细分，以提高网格质量。这通常用于使砖墙和楼梯等表面在靠近时看起来不那么平坦。
 
-4. 几何着色器在每个图元（三角形，线，点）上运行，并可以丢弃它或输出比进入的图元更多的图元。这与细分着色器相似，但要灵活得多。然而，在现今的应用程序中并没有大量使用，因为除了 Intel 的集成 GPU 外，大多数显卡的性能并不好。
+4. 几何着色器在每个图元（三角形，线，点）上运行，并可以丢弃它或输出比进入的图元更多的图元。这与细分着色器相似，但要灵活得多。然而，在现今的应用程序中并没有大量使用，因为除了
+   Intel 的集成 GPU 外，大多数显卡的性能并不好。
 
 5. 光栅化阶段将图元离散化为片段。这些是他们在帧缓冲区上填充的像素元素。任何落在屏幕外的片段都会被丢弃，顶点着色器输出的属性会在片段中插值，如图所示。通常也会在此处丢弃位于其他图元片段后面的片段，因为有深度测试。
 
@@ -290,21 +303,28 @@ VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) {
 
 绿色阶段被称为固定功能阶段。这些阶段允许你使用参数调整它们的操作，但它们的工作方式是预先定义的。
 
-另一方面，橙色阶段是可编程的，这意味着你可以向图形卡上传自己的代码，以精确地应用你想要的操作。这允许你使用片段着色器来实现从纹理和照明到光线追踪器等任何东西。这些程序同时在许多 GPU 核心上运行，以并行处理许多对象，例如顶点和片段。
+另一方面，橙色阶段是可编程的，这意味着你可以向图形卡上传自己的代码，以精确地应用你想要的操作。这允许你使用片段着色器来实现从纹理和照明到光线追踪器等任何东西。这些程序同时在许多
+GPU 核心上运行，以并行处理许多对象，例如顶点和片段。
 
-如果你以前使用过 OpenGL 和 Direct3D 等旧API，那么你会习惯于随心所欲地更改任何管道设置，如使用 glBlendFunc 和 OMSetBlendState 等调用。Vulkan 中的图形管道几乎完全是不可变的，所以如果你想要更改着色器，绑定不同的帧缓冲器或更改混合函数，你必须从头开始重新创建管道。缺点是你将不得不创建一些管道，这些管道代表了你在渲染操作中想要使用的所有不同状态的组合。然而，由于你将要在管道中执行的所有操作都是预先知道的，驱动程序可以更好地为其优化。
+如果你以前使用过 OpenGL 和 Direct3D 等旧API，那么你会习惯于随心所欲地更改任何管道设置，如使用 glBlendFunc 和
+OMSetBlendState 等调用。Vulkan
+中的图形管道几乎完全是不可变的，所以如果你想要更改着色器，绑定不同的帧缓冲器或更改混合函数，你必须从头开始重新创建管道。缺点是你将不得不创建一些管道，这些管道代表了你在渲染操作中想要使用的所有不同状态的组合。然而，由于你将要在管道中执行的所有操作都是预先知道的，驱动程序可以更好地为其优化。
 
 根据你打算做什么，一些可编程阶段是可选的。例如，如果你只是绘制简单的几何体，可以禁用曲面细分和几何阶段。如果你只对深度值感兴趣，那么你可以禁用片段着色器阶段，这对生成阴影图非常有用。
 
 ### 1.3.2 Shader模块
 
-与早期的API不同，Vulkan中的着色器代码必须以字节码格式指定，而不是像GLSL和HLSL那样的人类可读语法。这种字节码格式被称为SPIR-V，旨在与Vulkan和OpenCL（两者均为Khronos API）一起使用。它是一种可以用来编写图形和计算着色器的格式，但在这个教程中，我们将专注于在Vulkan的图形管道中使用的着色器。
+与早期的API不同，Vulkan中的着色器代码必须以字节码格式指定，而不是像GLSL和HLSL那样的人类可读语法。这种字节码格式被称为SPIR-V，旨在与Vulkan和OpenCL（两者均为Khronos
+API）一起使用。它是一种可以用来编写图形和计算着色器的格式，但在这个教程中，我们将专注于在Vulkan的图形管道中使用的着色器。
 
 使用字节码格式的优点在于，由GPU厂商编写的将着色器代码转换为本地代码的编译器复杂性明显减小。过去的经验表明，对于像GLSL这样的人类可读语法，一些GPU供应商对标准的解释相当灵活。如果你恰好用这些供应商的GPU编写了非平凡的着色器，那么你可能会冒着其他供应商的驱动程序因语法错误拒绝你的代码的风险，甚至更糟糕的情况是，由于编译器错误，你的着色器运行得不一样。有了像SPIR-V这样直接的字节码格式，这种情况希望能够避免。
 
-然而，这并不意味着我们需要手工编写这个字节码。Khronos发布了他们自己的供应商独立的编译器，可以将GLSL编译成SPIR-V。这个编译器设计用来验证你的着色器代码是否完全符合标准，并生成一个你可以与你的程序一起发货的SPIR-V二进制文件。你也可以把这个编译器作为一个库，以在运行时生成SPIR-V，但在这个教程中我们不会这么做。尽管我们可以通过glslangValidator.exe直接使用这个编译器，但我们将使用Google的**glslc.exe**。glslc的优点在于，它使用与GCC和Clang等知名编译器相同的参数格式，并包含一些额外的功能，如includes。它们都已经包含在Vulkan SDK中，所以你不需要下载任何额外的东西。
+然而，这并不意味着我们需要手工编写这个字节码。Khronos发布了他们自己的供应商独立的编译器，可以将GLSL编译成SPIR-V。这个编译器设计用来验证你的着色器代码是否完全符合标准，并生成一个你可以与你的程序一起发货的SPIR-V二进制文件。你也可以把这个编译器作为一个库，以在运行时生成SPIR-V，但在这个教程中我们不会这么做。尽管我们可以通过glslangValidator.exe直接使用这个编译器，但我们将使用Google的
+**glslc.exe**。glslc的优点在于，它使用与GCC和Clang等知名编译器相同的参数格式，并包含一些额外的功能，如includes。它们都已经包含在Vulkan
+SDK中，所以你不需要下载任何额外的东西。
 
-GLSL是一种具有C风格语法的着色语言。用它编写的程序有一个主函数，每个对象都会调用该函数。GLSL使用全局变量处理输入和输出，而不是使用参数作为输入和返回值作为输出。该语言包含许多用于图形编程的特性，如内置向量和矩阵原语。函数用于操作如叉积、矩阵-向量积和围绕向量的反射等操作。向量类型被称为vec，后面带有表示元素数量的数字。例如，一个3D位置将存储在vec3中。可以通过成员如.x来访问单个组件，也可以同时从多个组件创建新的向量。例如，表达式vec3(1.0, 2.0, 3.0).xy会导致vec2。向量的构造函数也可以接收向量对象和标量值的组合。例如，vec3可以用vec3(vec2(1.0, 2.0), 3.0)构造。
+GLSL是一种具有C风格语法的着色语言。用它编写的程序有一个主函数，每个对象都会调用该函数。GLSL使用全局变量处理输入和输出，而不是使用参数作为输入和返回值作为输出。该语言包含许多用于图形编程的特性，如内置向量和矩阵原语。函数用于操作如叉积、矩阵-向量积和围绕向量的反射等操作。向量类型被称为vec，后面带有表示元素数量的数字。例如，一个3D位置将存储在vec3中。可以通过成员如.x来访问单个组件，也可以同时从多个组件创建新的向量。例如，表达式vec3(
+1.0, 2.0, 3.0).xy会导致vec2。向量的构造函数也可以接收向量对象和标量值的组合。例如，vec3可以用vec3(vec2(1.0, 2.0), 3.0)构造。
 
 正如前一章所提到的，我们需要编写一个顶点着色器和一个片段着色器才能在屏幕上显示出一个三角形。接下来的两节将介绍每一个着色器的GLSL代码，然后我将向你展示如何生成两个SPIR-V二进制文件并加载到程序中。
 
@@ -312,14 +332,18 @@ GLSL是一种具有C风格语法的着色语言。用它编写的程序有一个
 
 顶点着色器处理每个传入的顶点。它将顶点的属性（如世界位置，颜色，法线和纹理坐标）作为输入。输出是裁剪坐标中的最终位置以及需要传递给片段着色器的属性，如颜色和纹理坐标。然后，这些值将通过光栅化程序在片段上进行插值，以产生平滑的渐变。
 
-裁剪坐标是顶点着色器产生的四维向量，随后将整个向量通过其最后一个分量来转换为归一化设备坐标。这些归一化设备坐标是将帧缓冲区映射到类似于以下的[-1, 1]乘[-1, 1]坐标系统的齐次坐标：
+裁剪坐标是顶点着色器产生的四维向量，随后将整个向量通过其最后一个分量来转换为归一化设备坐标。这些归一化设备坐标是将帧缓冲区映射到类似于以下的[-1, 1]
+乘[-1, 1]坐标系统的齐次坐标：
 
 ![img](https://vulkan-tutorial.com/images/normalized_device_coordinates.svg)
 
 > 裁剪坐标和归一化设备坐标 (NDC) 是3D图形渲染流程中的两个不同阶段。它们都是在顶点着色阶段和光栅化阶段之间进行的变换过程的一部分。
 >
-> 1. **裁剪坐标 (Clip Coordinates)**：当顶点位置从世界空间被转换到视图空间，再通过透视投影矩阵转换到裁剪空间时，就得到了裁剪坐标。这个四维向量用于定义视锥体（frustum），也就是我们在屏幕上实际看到的场景的范围。裁剪坐标的w分量可能不等于1，这是因为透视除法还没有发生。
-> 2. **归一化设备坐标 (Normalized Device Coordinates, NDC)**：通过透视除法（每个裁剪坐标的x、y、z分量都除以其w分量）得到归一化设备坐标。这是一个齐次坐标系，将视锥体映射到一个立方体，范围通常是[-1, 1]乘[-1, 1]乘[-1, 1]。此时，任何位于这个范围外的顶点都会被剔除或裁剪掉。
+> 1. **裁剪坐标 (Clip Coordinates)**
+     ：当顶点位置从世界空间被转换到视图空间，再通过透视投影矩阵转换到裁剪空间时，就得到了裁剪坐标。这个四维向量用于定义视锥体（frustum），也就是我们在屏幕上实际看到的场景的范围。裁剪坐标的w分量可能不等于1，这是因为透视除法还没有发生。
+> 2. **归一化设备坐标 (Normalized Device Coordinates, NDC)**
+     ：通过透视除法（每个裁剪坐标的x、y、z分量都除以其w分量）得到归一化设备坐标。这是一个齐次坐标系，将视锥体映射到一个立方体，范围通常是[-1, 1]
+     乘[-1, 1]乘[-1, 1]。此时，任何位于这个范围外的顶点都会被剔除或裁剪掉。
 >
 > 简单来说，裁剪坐标是用来确定哪些部分应该显示在屏幕上，而归一化设备坐标则是用来决定这些部分如何在屏幕上显示。
 
@@ -359,11 +383,17 @@ VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShade
 
 在Vulkan中，`Shader`、`ShaderModule` 和 `ShaderStage` 是着色器的三个关键组成部分，他们之间的关系如下：
 
-1. **Shader：** 着色器是一个程序，用于在图形管线的各种阶段执行操作。最常见的类型包括顶点着色器（对顶点数据进行操作）和片段着色器（计算像素颜色）。着色器通常用高级着色语言(HLSL, GLSL等)编写，并编译为字节码。
-2. **ShaderModule：** 在Vulkan中，着色器代码（已经被编译为字节码）必须封装在一个`VkShaderModule`对象中。这个对象就像一个容器，存储了着色器的字节码。可以理解为，`ShaderModule` 是用于管理着色器字节码的Vulkan对象。
-3. **ShaderStage：** 在Vulkan的渲染管线中，每个阶段都可以使用一个着色器。这些阶段包括顶点处理、几何处理、光栅化、片段处理等。`ShaderStage` 定义了着色器应该在管线的哪个阶段运行。例如，顶点着色器在顶点处理阶段运行，片段着色器在片段处理阶段运行。
+1. **Shader：**
+   着色器是一个程序，用于在图形管线的各种阶段执行操作。最常见的类型包括顶点着色器（对顶点数据进行操作）和片段着色器（计算像素颜色）。着色器通常用高级着色语言(
+   HLSL, GLSL等)编写，并编译为字节码。
+2. **ShaderModule：** 在Vulkan中，着色器代码（已经被编译为字节码）必须封装在一个`VkShaderModule`
+   对象中。这个对象就像一个容器，存储了着色器的字节码。可以理解为，`ShaderModule` 是用于管理着色器字节码的Vulkan对象。
+3. **ShaderStage：**
+   在Vulkan的渲染管线中，每个阶段都可以使用一个着色器。这些阶段包括顶点处理、几何处理、光栅化、片段处理等。`ShaderStage`
+   定义了着色器应该在管线的哪个阶段运行。例如，顶点着色器在顶点处理阶段运行，片段着色器在片段处理阶段运行。
 
-因此，你首先要写一个着色器，然后将其编译为字节码并包装在一个`ShaderModule`中。最后，你需要创建一个`ShaderStage`来指定在渲染管线的哪个阶段使用这个`ShaderModule`。
+因此，你首先要写一个着色器，然后将其编译为字节码并包装在一个`ShaderModule`中。最后，你需要创建一个`ShaderStage`
+来指定在渲染管线的哪个阶段使用这个`ShaderModule`。
 
 ### 1.3.3 固定阶段
 
@@ -388,9 +418,10 @@ dynamicState.pDynamicStates = dynamicStates.data();
 
 VkPipelineVertexInputStateCreateInfo结构描述了将被传递到顶点着色器的顶点数据的格式。它大致以两种方式描述这一点：
 
-- 绑定：数据之间的间距，以及数据是每个顶点还是每个实例（参见实例化） 
+- 绑定：数据之间的间距，以及数据是每个顶点还是每个实例（参见实例化）
 
-- 属性描述：传递给顶点着色器的属性的类型，从哪个绑定加载它们，以及在哪个偏移位置 因为我们直接在顶点着色器中硬编码顶点数据，所以我们会填充这个结构来指定现在没有顶点数据需要加载。我们将在顶点缓冲区章节中回到这一点。
+- 属性描述：传递给顶点着色器的属性的类型，从哪个绑定加载它们，以及在哪个偏移位置
+  因为我们直接在顶点着色器中硬编码顶点数据，所以我们会填充这个结构来指定现在没有顶点数据需要加载。我们将在顶点缓冲区章节中回到这一点。
 
 ```C++
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
@@ -402,21 +433,20 @@ VkPipelineVertexInputStateCreateInfo结构描述了将被传递到顶点着色�
 		vertexInputInfo.pVertexAttributeDescriptions = nullptr;
 ```
 
-
-
 pVertexBindingDescriptions和pVertexAttributeDescriptions成员指向一个描述加载顶点数据的上述细节的结构数组。在shaderStages数组之后，将这个结构添加到createGraphicsPipeline函数中。
 
 #### 3. Input assembly
 
 VkPipelineInputAssemblyStateCreateInfo结构描述了两件事：将从顶点绘制出什么样的几何形状，以及是否应启用基元重启。前者在topology成员中指定，可以有如下值：
 
-- VK_PRIMITIVE_TOPOLOGY_POINT_LIST：从顶点生成的点 
-- VK_PRIMITIVE_TOPOLOGY_LINE_LIST：每2个顶点生成一条线，不重复使用 
-- VK_PRIMITIVE_TOPOLOGY_LINE_STRIP：每条线的结束顶点用作下一条线的起始顶点 
-- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST：每3个顶点生成一个三角形，不重复使用 
-- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP：每个三角形的第二和第三个顶点用作下一个三角形的前两个顶点 
+- VK_PRIMITIVE_TOPOLOGY_POINT_LIST：从顶点生成的点
+- VK_PRIMITIVE_TOPOLOGY_LINE_LIST：每2个顶点生成一条线，不重复使用
+- VK_PRIMITIVE_TOPOLOGY_LINE_STRIP：每条线的结束顶点用作下一条线的起始顶点
+- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST：每3个顶点生成一个三角形，不重复使用
+- VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP：每个三角形的第二和第三个顶点用作下一个三角形的前两个顶点
 
-通常情况下，顶点按照顺序索引从顶点缓冲加载，但是有了元素缓冲器，你可以自己指定要使用的索引。这允许你执行优化操作，如重复使用顶点。如果你将primitiveRestartEnable成员设置为VK_TRUE，那么通过使用0xFFFF或0xFFFFFFFF 的特殊索引，就可以在_STRIP拓扑模式中打断线段和三角形。
+通常情况下，顶点按照顺序索引从顶点缓冲加载，但是有了元素缓冲器，你可以自己指定要使用的索引。这允许你执行优化操作，如重复使用顶点。如果你将primitiveRestartEnable成员设置为VK_TRUE，那么通过使用0xFFFF或0xFFFFFFFF
+的特殊索引，就可以在_STRIP拓扑模式中打断线段和三角形。
 
 #### 4. Viewports and scissors
 
@@ -434,7 +464,8 @@ viewport.maxDepth = 1.0f;
 
 请记住，交换链和其图像的大小可能与窗口的WIDTH和HEIGHT不同。交换链图像稍后将被用作帧缓冲器，所以我们应该坚持使用它们的大小。
 
-minDepth和maxDepth值指定了帧缓冲器使用的深度值范围。这些值必须在[0.0f, 1.0f]范围内，但minDepth可能比maxDepth大。如果你没有做任何特殊的事情，那么你应该坚持使用0.0f和1.0f的标准值。
+minDepth和maxDepth值指定了帧缓冲器使用的深度值范围。这些值必须在[0.0f, 1.0f]
+范围内，但minDepth可能比maxDepth大。如果你没有做任何特殊的事情，那么你应该坚持使用0.0f和1.0f的标准值。
 
 虽然视口定义了从图像到帧缓冲器的转换，剪刀矩形则定义了像素实际存储的区域。任何位于剪刀矩形外的像素都会被光栅化器丢弃。它们的功能类似于滤镜而非转换。下图说明了区别。注意，左侧的剪刀矩形只是产生那个图像的许多可能性之一，只要它大于视口就可以。
 
@@ -486,7 +517,8 @@ polygonMode决定了为几何体生成片段的方式。以下模式可用：
 rasterizer.lineWidth = 1.0f;
 ```
 
-lineWidth成员很简单，它描述了线的厚度，以片段数计算。支持的最大线宽取决于硬件，任何大于1.0f的线宽都需要你启用wideLines GPU功能。
+lineWidth成员很简单，它描述了线的厚度，以片段数计算。支持的最大线宽取决于硬件，任何大于1.0f的线宽都需要你启用wideLines
+GPU功能。
 
 ```
 rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
@@ -525,7 +557,8 @@ multisampling.alphaToOneEnable = VK_FALSE; // 可选项
 
 > 为什么需要Color blending?
 >
-> 在不使用颜色混合的情况下，新的像素颜色会直接替换已经存在的像素颜色，这在大多数场景下是可行的。然而，当我们需要呈现的对象具有**透明或半透明**效果时，就需要考虑旧的像素颜色和新的像素颜色如何组合在一起，这就需要使用颜色混合。
+> 在不使用颜色混合的情况下，新的像素颜色会直接替换已经存在的像素颜色，这在大多数场景下是可行的。然而，当我们需要呈现的对象具有
+**透明或半透明**效果时，就需要考虑旧的像素颜色和新的像素颜色如何组合在一起，这就需要使用颜色混合。
 
 在片段着色器返回一个颜色之后，需要将它与已经在帧缓冲器中的颜色进行组合。这种转换被称为颜色混合，有两种方法可以实现：
 
@@ -570,7 +603,7 @@ void cleanup() {
 }
 ```
 
-#### 9. 结论 
+#### 9. 结论
 
 以上就是所有固定函数状态的全部内容！从头开始设置所有这些确实需要大量工作，但优点是我们现在几乎完全了解图形管道中正在进行的一切！这降低了因为某些组件的默认状态不符合你的预期而遇到意外行为的机会。
 
@@ -588,14 +621,14 @@ void cleanup() {
 
 loadOp 和 storeOp 决定了在渲染之前和渲染之后对附件中的数据进行何种操作。我们对于 loadOp 有以下选择：
 
-- VK_ATTACHMENT_LOAD_OP_LOAD：保留附件中的现有内容 
-- VK_ATTACHMENT_LOAD_OP_CLEAR：在开始时清除为常数的值 
+- VK_ATTACHMENT_LOAD_OP_LOAD：保留附件中的现有内容
+- VK_ATTACHMENT_LOAD_OP_CLEAR：在开始时清除为常数的值
 - VK_ATTACHMENT_LOAD_OP_DONT_CARE：现有内容未定义；
 
 在我们的案例中，我们将使用 clear 操作在绘制新帧之前将帧缓冲区清除为黑色。storeOp 只有两种可能：
 
-- VK_ATTACHMENT_STORE_OP_STORE：渲染的内容将被存储在内存中，稍后可以读取 
-- VK_ATTACHMENT_STORE_OP_DONT_CARE：渲染操作后，帧缓冲区的内容将是未定义的 
+- VK_ATTACHMENT_STORE_OP_STORE：渲染的内容将被存储在内存中，稍后可以读取
+- VK_ATTACHMENT_STORE_OP_DONT_CARE：渲染操作后，帧缓冲区的内容将是未定义的
 
 我们对在屏幕上看到渲染的三角形感兴趣，所以我们在这里选择了 store 操作。
 
@@ -610,33 +643,42 @@ colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
 最常见的一些布局包括：
 
-- VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: 作为颜色附件使用的图像 
-- VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: 要在交换链中呈现的图像 
-- VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: 作为内存复制操作目标的图像 
+- VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: 作为颜色附件使用的图像
+- VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: 要在交换链中呈现的图像
+- VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: 作为内存复制操作目标的图像
 
 我们将在纹理章节中更深入地讨论这个主题，但现在需要知道的重要一点是，图像需要转换到适合它们将参与的下一步操作的特定布局。
 
-initialLayout 指定了渲染通道开始前图像的布局。finalLayout 指定了渲染通道结束时自动过渡到的布局。对于 initialLayout 使用 VK_IMAGE_LAYOUT_UNDEFINED 表示我们不关心图像之前的布局。这个特殊值的注意事项是，不能保证图像的内容被保留，但那没关系，因为我们无论如何都要清除它。我们希望渲染后的图像准备好通过交换链进行呈现，这就是我们使用 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR 作为 finalLayout 的原因。
+initialLayout 指定了渲染通道开始前图像的布局。finalLayout 指定了渲染通道结束时自动过渡到的布局。对于 initialLayout 使用
+VK_IMAGE_LAYOUT_UNDEFINED 表示我们不关心图像之前的布局。这个特殊值的注意事项是，不能保证图像的内容被保留，但那没关系，因为我们无论如何都要清除它。我们希望渲染后的图像准备好通过交换链进行呈现，这就是我们使用
+VK_IMAGE_LAYOUT_PRESENT_SRC_KHR 作为 finalLayout 的原因。
 
 #### 3. Subpasses and attachment references
 
-一个单独的渲染通道可以包含多个子通道。子通道是依赖于前一次过程中帧缓冲区内容的后续渲染操作，例如，一个接一个应用的后处理效果序列。如果你将这些渲染操作分组成一个渲染通道，那么 Vulkan 能够重新排序这些操作，并节省内存带宽，可能提供更好的性能。然而，对于我们的第一个三角形，我们将坚持使用一个子通道。
+一个单独的渲染通道可以包含多个子通道。子通道是依赖于前一次过程中帧缓冲区内容的后续渲染操作，例如，一个接一个应用的后处理效果序列。如果你将这些渲染操作分组成一个渲染通道，那么
+Vulkan 能够重新排序这些操作，并节省内存带宽，可能提供更好的性能。然而，对于我们的第一个三角形，我们将坚持使用一个子通道。
 
 每个子通道都引用了我们在前面章节中使用结构描述的一个或多个附件。这些引用本身就是 VkAttachmentReference 结构体。
 
-> 在 Vulkan 中，一条渲染管线可以关联多个 render pass。一个 render pass 定义了一系列的渲染操作及其依赖关系。你可以将多个不同的渲染操作组合在一个 render pass 中以实现更有效的资源管理和可能的性能优化。但是，在每一时刻，只有一个 render pass 可以在渲染管线中激活并执行。
+> 在 Vulkan 中，一条渲染管线可以关联多个 render pass。一个 render pass 定义了一系列的渲染操作及其依赖关系。你可以将多个不同的渲染操作组合在一个
+> render pass 中以实现更有效的资源管理和可能的性能优化。但是，在每一时刻，只有一个 render pass 可以在渲染管线中激活并执行。
 >
-> 值得注意的是，虽然一个渲染管线可以关联多个 render pass，但**每次 draw call 只能在一个特定的 render pass 上下文中进行**。这意味着，你不能在一个 draw call 中同时使用两个或更多的 render pass。
+> 值得注意的是，虽然一个渲染管线可以关联多个 render pass，但**每次 draw call 只能在一个特定的 render pass 上下文中进行**
+> 。这意味着，你不能在一个 draw call 中同时使用两个或更多的 render pass。
 
 > **`VkImageView`和`attachment`**
 >
 > 在Vulkan中，`VkImageView`和附件（attachment）之间的关系非常紧密。
 >
-> 在渲染过程中，附件是一个用于读取、写入和存储像素数据的抽象概念。每个附件都关联着一个图像资源，这个图像资源实际上就是通过`VkImageView`来表示的。
 >
-> 当我们创建一个`VkRenderPass`时，需要定义一组附件描述（attachment descriptions），每个附件描述都标识出在渲染管线的哪个阶段使用该附件，以及如何使用它（例如颜色缓冲、深度缓冲等）。然而，这些描述并没有指定具体的数据存储位置，也就是说，它们并没有直接关联到一个实际的图像资源。
+在渲染过程中，附件是一个用于读取、写入和存储像素数据的抽象概念。每个附件都关联着一个图像资源，这个图像资源实际上就是通过`VkImageView`
+来表示的。
 >
-> 这就是`VkImageView`的作用所在。当我们创建一个`VkFramebuffer`对象时，需要为每个附件提供一个对应的`VkImageView`对象。这样，每个附件就会被绑定到一个实际的图像资源，即`VkImageView`所引用的`VkImage`。
+> 当我们创建一个`VkRenderPass`时，需要定义一组附件描述（attachment
+> descriptions），每个附件描述都标识出在渲染管线的哪个阶段使用该附件，以及如何使用它（例如颜色缓冲、深度缓冲等）。然而，这些描述并没有指定具体的数据存储位置，也就是说，它们并没有直接关联到一个实际的图像资源。
+>
+> 这就是`VkImageView`的作用所在。当我们创建一个`VkFramebuffer`对象时，需要为每个附件提供一个对应的`VkImageView`
+> 对象。这样，每个附件就会被绑定到一个实际的图像资源，即`VkImageView`所引用的`VkImage`。
 >
 > 因此，可以说附件在逻辑上代表了渲染管线中的一个输入/输出位置，而`VkImageView`则提供了访问这个位置所需的具体图像资源的方式。
 
@@ -651,7 +693,8 @@ initialLayout 指定了渲染通道开始前图像的布局。finalLayout 指定
 
 这些组合完全定义了图形管线的功能，因此我们现在可以开始填充位于createGraphicsPipeline函数末尾的VkGraphicsPipelineCreateInfo结构。但在调用vkDestroyShaderModule之前，因为这些在创建过程中仍然需要使用。
 
-实际上还有两个参数：`basePipelineHandle`和`basePipelineIndex`。Vulkan允许你通过从现有的管线派生来创建一个新的图形管线。管线衍生物的理念是，当管线与现有的管线有很多功能相同时，设置管线的成本会更低，且从同一父管线切换也能更快地完成。你可以使用basePipelineHandle指定一个现有管线的句柄，或者使用basePipelineIndex通过索引引用即将创建的另一个管线。目前只有一个管线，所以我们只需指定一个空句柄和一个无效索引。只有在VkGraphicsPipelineCreateInfo的flags字段中也指定了VK_PIPELINE_CREATE_DERIVATIVE_BIT标志时，才会使用这些值。
+实际上还有两个参数：`basePipelineHandle`和`basePipelineIndex`
+。Vulkan允许你通过从现有的管线派生来创建一个新的图形管线。管线衍生物的理念是，当管线与现有的管线有很多功能相同时，设置管线的成本会更低，且从同一父管线切换也能更快地完成。你可以使用basePipelineHandle指定一个现有管线的句柄，或者使用basePipelineIndex通过索引引用即将创建的另一个管线。目前只有一个管线，所以我们只需指定一个空句柄和一个无效索引。只有在VkGraphicsPipelineCreateInfo的flags字段中也指定了VK_PIPELINE_CREATE_DERIVATIVE_BIT标志时，才会使用这些值。
 
 vkCreateGraphicsPipelines函数实际上比Vulkan中的常用对象创建函数有更多的参数。它被设计为接收多个VkGraphicsPipelineCreateInfo对象，并在一次调用中创建多个VkPipeline对象。
 
@@ -675,32 +718,44 @@ width和height参数不言自明，layers则指的是图像数组中的层数。
 >
 > `VkImageView`可以视为图像的一个视图或复制品，它描述了如何访问图像以及图像的哪一部分应该被访问。
 >
-> 而`VkFramebuffer`则是渲染操作的最终目标，它包含一个或多个`VkImageView`对象。每个`VkImageView`都代表了一个附件（attachment），这些附件在渲染管线的不同阶段用于读取、写入和存储像素数据。
+> 而`VkFramebuffer`则是渲染操作的最终目标，它包含一个或多个`VkImageView`对象。每个`VkImageView`
+> 都代表了一个附件（attachment），这些附件在渲染管线的不同阶段用于读取、写入和存储像素数据。
 >
-> 当你创建`VkFramebuffer`时，需要指定与其兼容的`VkRenderPass`，并提供绑定到渲染通道中附件描述的`VkImageView`对象数组。这就意味着，渲染结果将会被写入由`VkFramebuffer`引用的`VkImageView`所表示的附件。因此，具体来说，`VkImageView`定义了怎么样以及在哪里存储像素数据，而`VkFramebuffer`则定义了在哪些`VkImageView`中存储渲染结果。
+> 当你创建`VkFramebuffer`时，需要指定与其兼容的`VkRenderPass`，并提供绑定到渲染通道中附件描述的`VkImageView`
+> 对象数组。这就意味着，渲染结果将会被写入由`VkFramebuffer`引用的`VkImageView`所表示的附件。因此，具体来说，`VkImageView`
+> 定义了怎么样以及在哪里存储像素数据，而`VkFramebuffer`则定义了在哪些`VkImageView`中存储渲染结果。
 >
 > 因此，可以说`VkFramebuffer`和`VkImageView`在Vulkan的渲染过程中共同扮演了关键角色。
 >
-> 你可以将`VkFramebuffer`视为指向一组`VkImageView`对象的引用或指针。实际上，`VkFramebuffer`并不直接包含图像数据，而是通过引用`VkImageView`对象来间接访问这些数据。
+> 你可以将`VkFramebuffer`视为指向一组`VkImageView`对象的引用或指针。实际上，`VkFramebuffer`
+> 并不直接包含图像数据，而是通过引用`VkImageView`对象来间接访问这些数据。
 >
-> 在创建`VkFramebuffer`时，你需要提供一个`VkImageView`对象数组，每个`VkImageView`都代表了一个附件（可能是颜色、深度、模板缓冲区等）。当渲染操作发生时，这些附件被用于存储输入和输出的像素数据。
+> 在创建`VkFramebuffer`时，你需要提供一个`VkImageView`对象数组，每个`VkImageView`
+> 都代表了一个附件（可能是颜色、深度、模板缓冲区等）。当渲染操作发生时，这些附件被用于存储输入和输出的像素数据。
 >
-> 所以说，`VkFramebuffer`可以看作是一个指针，它指向了执行渲染操作所需的所有附件。但请注意，这只是一个比喻，实际的Vulkan API比这个概念复杂得多。
+> 所以说，`VkFramebuffer`可以看作是一个指针，它指向了执行渲染操作所需的所有附件。但请注意，这只是一个比喻，实际的Vulkan
+> API比这个概念复杂得多。
 
 ### 1.4.2 Command buffers
 
-在Vulkan中，诸如绘图操作和内存传输等命令不是直接通过函数调用执行的。你必须将要执行的所有操作记录在命令缓冲区对象中。这样做的好处是，当我们准备告诉 Vulkan 我们想要做什么时，所有的命令一起提交，因为所有的命令都一起可用，Vulkan 可以更有效地处理这些命令。此外，如果需要，这还允许在多个线程中进行命令记录。
+在Vulkan中，诸如绘图操作和内存传输等命令不是直接通过函数调用执行的。你必须将要执行的所有操作记录在命令缓冲区对象中。这样做的好处是，当我们准备告诉
+Vulkan 我们想要做什么时，所有的命令一起提交，因为所有的命令都一起可用，Vulkan 可以更有效地处理这些命令。此外，如果需要，这还允许在多个线程中进行命令记录。
 
 #### 1. 命令池 Command Pool
 
-在我们创建命令缓冲区之前，需要先创建一个命令池。命令池负责管理用于存储缓冲区的内存，而命令缓冲区则从其中分配。添加一个新的类成员来存储 VkCommandPool。
+在我们创建命令缓冲区之前，需要先创建一个命令池。命令池负责管理用于存储缓冲区的内存，而命令缓冲区则从其中分配。添加一个新的类成员来存储
+VkCommandPool。
 
 `VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`和`VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`都是命令池创建标志，但它们的含义和用途有所不同：
 
-1. `VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`: 这个标志表示命令缓冲区可能会频繁地被新命令重新记录（rerecorded）。在Vulkan中，你可以把一系列操作（例如绘图或内存传输等）录制到一个命令缓冲区中，然后在需要时执行这些操作。如果你知道某个命令缓冲区会经常被重用（即清空并填入新的命令），那么就可以在创建命令池时使用这个标志，Vulkan可能会根据此标志优化其内部的内存分配策略。
-2. `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`: 这个标志允许单独重置命令缓冲区。默认情况下，从同一个命令池分配的所有命令缓冲区必须一起被重置，也就是说，你不能只重置其中的一个，必须重置所有的。如果你设置了这个标志，那么就可以选择性地重置某个特定的命令缓冲区，而不是一口气重置所有的。
+1. `VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`:
+   这个标志表示命令缓冲区可能会频繁地被新命令重新记录（rerecorded）。在Vulkan中，你可以把一系列操作（例如绘图或内存传输等）录制到一个命令缓冲区中，然后在需要时执行这些操作。如果你知道某个命令缓冲区会经常被重用（即清空并填入新的命令），那么就可以在创建命令池时使用这个标志，Vulkan可能会根据此标志优化其内部的内存分配策略。
+2. `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`:
+   这个标志允许单独重置命令缓冲区。默认情况下，从同一个命令池分配的所有命令缓冲区必须一起被重置，也就是说，你不能只重置其中的一个，必须重置所有的。如果你设置了这个标志，那么就可以选择性地重置某个特定的命令缓冲区，而不是一口气重置所有的。
 
-这两个标志在某些情况下是很有用的。例如，如果你的应用程序每帧都要录制新的命令（比如因为摄像机移动、物体动画等），那么`VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`可能会提高效率。同样，如果你的应用程序需要管理大量的命令缓冲区，并且希望能够灵活地重置它们，那么`VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`就可能派上用场。
+这两个标志在某些情况下是很有用的。例如，如果你的应用程序每帧都要录制新的命令（比如因为摄像机移动、物体动画等），那么`VK_COMMAND_POOL_CREATE_TRANSIENT_BIT`
+可能会提高效率。同样，如果你的应用程序需要管理大量的命令缓冲区，并且希望能够灵活地重置它们，那么`VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`
+就可能派上用场。
 
 通过在设备队列（例如我们获取的图形和演示队列）上提交命令缓冲区来执行它们。每个命令池只能分配在单一类型的队列上提交的命令缓冲区。我们将记录用于绘制的命令，这就是我们选择图形队列族的原因。
 
@@ -708,12 +763,13 @@ width和height参数不言自明，layers则指的是图像数组中的层数。
 
 命令缓冲区在其命令池被销毁时会自动释放，所以我们不需要进行显式的清理。
 
-现在我们将开始编写一个createCommandBuffer函数，从命令池中分配单个命令缓冲区。 命令缓冲区使用vkAllocateCommandBuffers函数进行分配，该函数接受一个VkCommandBufferAllocateInfo结构体作为参数，该结构体指定了命令池和要分配的缓冲区的数量：
+现在我们将开始编写一个createCommandBuffer函数，从命令池中分配单个命令缓冲区。
+命令缓冲区使用vkAllocateCommandBuffers函数进行分配，该函数接受一个VkCommandBufferAllocateInfo结构体作为参数，该结构体指定了命令池和要分配的缓冲区的数量：
 
 level参数指定分配的命令缓冲区是主命令缓冲区还是次级命令缓冲区。
 
-- VK_COMMAND_BUFFER_LEVEL_PRIMARY：可以提交到队列进行执行，但不能从其他命令缓冲区调用。 
-- VK_COMMAND_BUFFER_LEVEL_SECONDARY：不能直接提交，但可以从主命令缓冲区调用。 
+- VK_COMMAND_BUFFER_LEVEL_PRIMARY：可以提交到队列进行执行，但不能从其他命令缓冲区调用。
+- VK_COMMAND_BUFFER_LEVEL_SECONDARY：不能直接提交，但可以从主命令缓冲区调用。
 
 虽然我们在这里不会使用次级命令缓冲区的功能，但你可以想象它有助于从主命令缓冲区重用常见的操作。由于我们只分配一个命令缓冲区，所以commandBufferCount参数就是1。
 
@@ -725,9 +781,9 @@ level参数指定分配的命令缓冲区是主命令缓冲区还是次级命令
 
 flags参数指定了我们将如何使用命令缓冲区。可用的值包括:
 
-- VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT：命令缓冲区将在执行一次后立即重新记录。 
-- VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT：这是一个完全在单个渲染通道内部的次级命令缓冲区。 
-- VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT：命令缓冲区可以在已经等待执行的同时被重新提交。 
+- VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT：命令缓冲区将在执行一次后立即重新记录。
+- VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT：这是一个完全在单个渲染通道内部的次级命令缓冲区。
+- VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT：命令缓冲区可以在已经等待执行的同时被重新提交。
 
 对于我们当前的情况，这些标志都不适用。
 
@@ -737,7 +793,9 @@ pInheritanceInfo参数只对次级命令缓冲区有关系。它指定了从调�
 
 > 在Vulkan中，“record”是一个非常重要的概念。记录，或者编程，是指将一系列操作（命令）编入一个命令缓冲区中。
 >
-> 当你"记录"一个命令缓冲区时，你会使用各种Vulkan函数来填充（或记录）该命令缓冲区。这些函数对应的行为可能包括渲染、内存传输、计算等。这些命令不会立即被执行，而是存储在命令缓冲区中以供稍后执行。这样做的好处是可以预先准备多个操作，然后一次性提交给GPU进行处理，从而实现更有效的并行计算和资源管理。
+> 当你"记录"
+>
+一个命令缓冲区时，你会使用各种Vulkan函数来填充（或记录）该命令缓冲区。这些函数对应的行为可能包括渲染、内存传输、计算等。这些命令不会立即被执行，而是存储在命令缓冲区中以供稍后执行。这样做的好处是可以预先准备多个操作，然后一次性提交给GPU进行处理，从而实现更有效的并行计算和资源管理。
 >
 > 在这种情况下，"记录"一个命令并不意味着它已经执行——只是说它已经被安排在一个序列中，等待被发送到GPU上。只有当命令缓冲区被提交到命令队列并且达到其在队列中的点时，其中的命令才会被执行。
 >
@@ -755,7 +813,8 @@ pInheritanceInfo参数只对次级命令缓冲区有关系。它指定了从调�
 >
 > 这里的"record"概念与命令池和命令缓冲区紧密相关。当你“记录”命令到一个命令缓冲区时，你实际上是在使用命令池中分配的空间来存储你想要GPU执行的命令序列。然后，你可以将这个已经“记录”了命令的缓冲区提交给GPU进行处理。
 >
-> 总的来说，命令池、命令缓冲区和"record"都是Vulkan中命令组织和调度过程的重要组成部分。首先你通过命令池创建并管理命令缓冲区，然后你将一系列命令“记录”到这些命令缓冲区中，最后再将这些缓冲区提交给GPU执行。
+> 总的来说，命令池、命令缓冲区和"record"
+> 都是Vulkan中命令组织和调度过程的重要组成部分。首先你通过命令池创建并管理命令缓冲区，然后你将一系列命令“记录”到这些命令缓冲区中，最后再将这些缓冲区提交给GPU执行。
 
 #### 4. Starting a render pass
 
@@ -873,7 +932,8 @@ if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
 
 #### 2. Synchronization
 
-Vulkan的一个核心设计理念是GPU上执行的同步是显式的。操作的顺序由我们使用各种同步原语来定义，这些原语告诉驱动程序我们希望事物按照什么顺序运行。这意味着许多开始在GPU上执行工作的Vulkan API调用都是异步的，这些函数将在操作完成之前返回。
+Vulkan的一个核心设计理念是GPU上执行的同步是显式的。操作的顺序由我们使用各种同步原语来定义，这些原语告诉驱动程序我们希望事物按照什么顺序运行。这意味着许多开始在GPU上执行工作的Vulkan
+API调用都是异步的，这些函数将在操作完成之前返回。
 
 在本章中，我们需要明确排序的事件有很多，因为它们发生在GPU上，例如：
 
@@ -936,8 +996,10 @@ save_screenshot_to_disk() // 不能运行，直到传输完成
 
 > 信号量（Semaphore）和围栏（Fence）都是用于同步操作的原语，但它们的使用场景和目标有所不同。
 >
-> - 信号量：主要用于GPU与GPU之间的同步。例如，在两个不同的队列操作（可能是不同的GPU任务）之间添加顺序性。当一个操作完成时，它会发出（signal）一个信号量，然后另一个操作在开始之前等待（wait）这个信号量。这样可以保证操作的执行顺序。信号量主要关注GPU上的操作顺序，对于CPU来说，基本是透明的。
-> - 围栏：主要用于CPU与GPU之间的同步。当我们提交一个任务到GPU执行，并且需要知道何时完成时，我们会使用一个围栏。任务完成后，围栏被标记为已信号状态，然后我们可以让CPU等待这个围栏变为已信号状态。这样可以确保在CPU继续之前，GPU的工作已经完成。因此，围栏主要关注主机（CPU）与设备（GPU）之间的同步。
+> -
+信号量：主要用于GPU与GPU之间的同步。例如，在两个不同的队列操作（可能是不同的GPU任务）之间添加顺序性。当一个操作完成时，它会发出（signal）一个信号量，然后另一个操作在开始之前等待（wait）这个信号量。这样可以保证操作的执行顺序。信号量主要关注GPU上的操作顺序，对于CPU来说，基本是透明的。
+> -
+围栏：主要用于CPU与GPU之间的同步。当我们提交一个任务到GPU执行，并且需要知道何时完成时，我们会使用一个围栏。任务完成后，围栏被标记为已信号状态，然后我们可以让CPU等待这个围栏变为已信号状态。这样可以确保在CPU继续之前，GPU的工作已经完成。因此，围栏主要关注主机（CPU）与设备（GPU）之间的同步。
 >
 > 总结一下，虽然这两种同步原语都可以使操作有序进行，但信号量主要用于控制在设备（GPU）内部的操作顺序，而围栏主要用于同步设备（GPU）和主机（CPU）的操作。
 
@@ -1041,9 +1103,12 @@ vkWaitForFences函数接受一个围栏数组，并在主机上等待任何或�
 vkResetFences(device, 1, &inFlightFence);
 ```
 
-在我们可以继续之前，我们的设计中出现了一个小问题。在第一帧我们调用drawFrame()，它立即等待inFlightFence被标记。只有在一帧渲染完成后，inFlightFence才会被标记，但由于这是第一帧，所以没有前一帧可以标记围栏！因此，vkWaitForFences()无限阻塞，等待永远不会发生的事情。
+在我们可以继续之前，我们的设计中出现了一个小问题。在第一帧我们调用drawFrame()
+，它立即等待inFlightFence被标记。只有在一帧渲染完成后，inFlightFence才会被标记，但由于这是第一帧，所以没有前一帧可以标记围栏！因此，vkWaitForFences()
+无限阻塞，等待永远不会发生的事情。
 
-对于这个难题，有许多解决方案，API内置了一个巧妙的应对方法。创建一个已经标记为完成的围栏，这样第一次调用vkWaitForFences()就会立即返回，因为围栏已经被标记。
+对于这个难题，有许多解决方案，API内置了一个巧妙的应对方法。创建一个已经标记为完成的围栏，这样第一次调用vkWaitForFences()
+就会立即返回，因为围栏已经被标记。
 
 为此，我们在VkFenceCreateInfo中添加VK_FENCE_CREATE_SIGNALED_BIT标志：
 
@@ -1061,7 +1126,8 @@ void createSyncObjects() {
 
 #### 5. Acquiring an image from the swap chain
 
-在drawFrame函数中，我们需要做的下一件事就是从交换链获取图像。回想一下，交换链是一个扩展特性，所以我们必须使用带有vk*KHR命名约定的函数：
+在drawFrame函数中，我们需要做的下一件事就是从交换链获取图像。回想一下，交换链是一个扩展特性，所以我们必须使用带有vk*
+KHR命名约定的函数：
 
 ```cpp
 void drawFrame() {
@@ -1108,12 +1174,14 @@ submitInfo.waitSemaphoreCount = 1;
 submitInfo.pWaitSemaphores = waitSemaphores;
 submitInfo.pWaitDstStageMask = waitStages;
 ```
+
 前三个参数指定在执行开始之前应等待哪些信号量以及在管道的哪个阶段等待。我们希望在图像可用之前等待写入颜色，所以我们指定写入颜色附件的图形管道的阶段。这意味着理论上，实现可以在图像还不可用时就开始执行我们的顶点着色器等任务。waitStages数组中的每个条目对应pWaitSemaphores中具有相同索引的信号量。
 
 ```cpp
 submitInfo.commandBufferCount = 1;
 submitInfo.pCommandBuffers = &commandBuffer;
 ```
+
 下两个参数指定实际提交执行的命令缓冲区。我们直接提交我们拥有的单个命令缓冲区。
 
 ```cpp
@@ -1121,6 +1189,7 @@ VkSemaphore signalSemaphores[] = {renderFinishedSemaphore};
 submitInfo.signalSemaphoreCount = 1;
 submitInfo.pSignalSemaphores = signalSemaphores;
 ```
+
 signalSemaphoreCount和pSignalSemaphores参数指定了命令缓冲区完成执行后要发出信号的信号量。在我们的情况下，我们使用renderFinishedSemaphore用于此目的。
 
 ```cpp
@@ -1128,11 +1197,13 @@ if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
     throw std::runtime_error("failed to submit draw command buffer!");
 }
 ```
+
 我们现在可以使用vkQueueSubmit将命令缓冲区提交给图形队列。该函数将一组VkSubmitInfo结构作为参数，当工作负载更大时，这种方式更高效。最后一个参数引用一个可选围栏，在命令缓冲区完成执行时会发出信号。这使我们能知道何时可以安全地重复使用命令缓冲区，因此我们想要将其赋值给inFlightFence。现在在下一帧中，CPU会等待此命令缓冲区完成执行后再记录新的命令进入其中。
 
 #### 8. Subpass dependencies
 
-请记住，渲染过程中的子通道会自动处理图像布局转换。这些转换由子通道依赖来控制，这些依赖指定了子通道之间的内存和执行依赖关系。我们现在只有一个子通道，但是在这个子通道之前和之后的操作也被视为隐式的"子通道"。
+请记住，渲染过程中的子通道会自动处理图像布局转换。这些转换由子通道依赖来控制，这些依赖指定了子通道之间的内存和执行依赖关系。我们现在只有一个子通道，但是在这个子通道之前和之后的操作也被视为隐式的"
+子通道"。
 
 有两个内置的依赖关系负责在渲染过程开始和结束时的转换，但前者并未在正确的时间发生。它假设转换发生在管线的开始，但我们在那个时候还没有获取到图像！处理这个问题有两种方式。我们可以将imageAvailableSemaphore的waitStages更改为VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT来确保在图像可用之前不开始渲染过程，或者我们可以让渲染过程等待VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT阶段。我决定在这里使用第二种选项，因为这是一个很好的理由去查看子通道依赖以及他们如何工作。
 
@@ -1143,24 +1214,28 @@ VkSubpassDependency dependency{};
 dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
 dependency.dstSubpass = 0;
 ```
+
 前两个字段指定了依赖关系和依赖子通道的索引。特殊值VK_SUBPASS_EXTERNAL根据其在srcSubpass或dstSubpass中的指定，分别指代渲染过程之前或之后的隐式子通道。索引0则指我们的子通道，它是唯一且排在首位的子通道。dstSubpass必须始终高于srcSubpass，以防止依赖图中的循环（除非其中一个子通道是VK_SUBPASS_EXTERNAL）。
 
 ```cpp
 dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 dependency.srcAccessMask = 0;
 ```
+
 接下来的两个字段指定了要等待的操作以及这些操作发生的阶段。我们需要等待交换链完成从图像中读取的操作，然后我们才能访问它。通过等待颜色附件输出阶段本身，可以实现这一点。
 
 ```cpp
 dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 ```
+
 应该等待这个阶段的操作处于颜色附件阶段，并涉及写入颜色附件。这些设置将防止在实际需要（并允许）时转换发生：当我们希望开始向其写入颜色时。
 
 ```cpp
 renderPassInfo.dependencyCount = 1;
 renderPassInfo.pDependencies = &dependency;
 ```
+
 VkRenderPassCreateInfo结构体有两个字段用于指定依赖项数组。
 
 #### 9. Presentation
@@ -1174,6 +1249,7 @@ presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 presentInfo.waitSemaphoreCount = 1;
 presentInfo.pWaitSemaphores = signalSemaphores;
 ```
+
 前两个参数指定在展示可以发生之前要等待的信号量，就像VkSubmitInfo一样。由于我们想等待命令缓冲区完成执行，从而绘制出我们的三角形，我们接收将被信号化并等待它们的信号量，因此我们使用signalSemaphores。
 
 ```cpp
@@ -1182,16 +1258,19 @@ presentInfo.swapchainCount = 1;
 presentInfo.pSwapchains = swapChains;
 presentInfo.pImageIndices = &imageIndex;
 ```
+
 接下来的两个参数指定要向其展示图像的交换链和每个交换链的图像索引。这几乎总是单一的。
 
 ```cpp
 presentInfo.pResults = nullptr; // Optional
 ```
+
 还有一个叫做pResults的可选参数。它允许你指定一个VkResult值数组，用于检查每个独立的交换链是否成功展示。如果你只使用一个交换链，那么这不是必需的，因为你可以简单地使用呈现函数的返回值。
 
 ```cpp
 vkQueuePresentKHR(presentQueue, &presentInfo);
 ```
+
 vkQueuePresentKHR函数提交了向交换链展示一个图像的请求。我们将在下一章为vkAcquireNextImageKHR和vkQueuePresentKHR添加错误处理，因为他们的失败并不一定意味着程序应该终止，与我们迄今为止看到的函数不同。
 
 如果你到目前为止做得都正确，那么当你运行你的程序时，你应该可以看到以下内容：
@@ -1218,6 +1297,7 @@ void mainLoop() {
     vkDeviceWaitIdle(device);
 }
 ```
+
 你也可以等待特定命令队列中的操作完成，使用vkQueueWaitIdle。这些函数可以作为一种非常基础的方式来执行同步。你会发现当关闭窗口时，程序现在没有问题地退出了。
 
 #### 10. Conclusion
@@ -1237,6 +1317,7 @@ void mainLoop() {
 ```c++
 const int MAX_FRAMES_IN_FLIGHT = 2;
 ```
+
 我们选择数字2，因为我们不希望CPU超前于GPU太多。有2个飞行中的帧时，CPU和GPU可以同时进行各自的任务。如果CPU提前结束，它将等待GPU完成渲染，然后提交更多工作。对于3个或更多的飞行中的帧，CPU可能超过GPU，增加了帧延迟。通常，额外的延迟是不希望的。但是，让应用程序控制飞行中的帧数量是Vulkan明确性的另一个例子。
 
 每一帧都应该有自己的命令缓冲区、信号量集和栅栏。重命名并改变它们为对象的std::vectors：
@@ -1250,6 +1331,7 @@ std::vector<VkSemaphore> imageAvailableSemaphores;
 std::vector<VkSemaphore> renderFinishedSemaphores;
 std::vector<VkFence> inFlightFences;
 ```
+
 接着，我们需要创建多个命令缓冲区。将createCommandBuffer重命名为createCommandBuffers。接下来我们需要调整命令缓冲区向量的大小为MAX_FRAMES_IN_FLIGHT的大小，改变VkCommandBufferAllocateInfo使其包含那么多命令缓冲区，然后改变目标为我们的命令缓冲区向量：
 
 ```c++
@@ -1263,6 +1345,7 @@ void createCommandBuffers() {
     }
 }
 ```
+
 createSyncObjects函数应被改变以创建所有的对象：
 
 ```c++
@@ -1288,6 +1371,7 @@ void createSyncObjects() {
     }
 }
 ```
+
 同样的，它们也应该全部被清理：
 
 ```c++
@@ -1301,6 +1385,7 @@ void cleanup() {
     ...
 }
 ```
+
 记住，因为当我们释放命令池时，命令缓冲区会为我们自动释放，所以我们没有额外的命令缓冲区清理工作要做。
 
 为了在每个帧使用正确的对象，我们需要跟踪当前的帧。我们将使用一个帧索引来实现这一点：
@@ -1308,6 +1393,7 @@ void cleanup() {
 ```c++
 uint32_t currentFrame = 0;
 ```
+
 现在可以修改drawFrame函数，使用正确的对象：
 
 ```c++
@@ -1339,6 +1425,7 @@ void drawFrame() {
     if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
 }
 ```
+
 当然，我们不应该忘记每次都进入下一个帧：
 
 ```c++
@@ -1348,6 +1435,7 @@ void drawFrame() {
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 ```
+
 通过使用模运算符（%），我们确保在每个MAX_FRAMES_IN_FLIGHT队列帧之后帧索引都会循环。
 
 我们现在已经实现了所有需要的同步，以确保队列中的工作帧不超过MAX_FRAMES_IN_FLIGHT，并且这些帧不会相互干扰。请注意，像最后的清理这样的代码其他部分，依赖于更粗糙的同步，如vkDeviceWaitIdle，是没问题的。你应该根据性能需求决定使用哪种方法。
@@ -1355,3 +1443,243 @@ void drawFrame() {
 要通过例子了解更多关于同步的信息，请查看Khronos的这个详尽的概述。
 
 在下一章中，我们将处理一个规范的Vulkan程序所需的另一个小事情。
+
+### 1.5 Swap chain recreation
+
+#### Introduction
+
+我们现在的应用程序可以成功地绘制一个三角形，但还有一些情况没有得到适当地处理。窗口表面有可能发生变化，使得交换链与其不再兼容。造成此类情况的原因之一是窗口大小的改变。我们需要捕获这些事件并重新创建交换链。
+
+#### Recreating the swap chain
+
+创建一个新的recreateSwapChain函数，该函数调用createSwapChain以及所有取决于交换链或窗口大小的对象的创建函数。
+
+```cpp
+void recreateSwapChain() {
+    vkDeviceWaitIdle(device);
+
+    createSwapChain();
+    createImageViews();
+    createFramebuffers();
+}
+```
+
+我们首先调用vkDeviceWaitIdle，因为正如上一章所述，我们不应接触可能仍在使用的资源。显然，我们必须重新创建交换链。图像视图需要被重新创建，因为它们直接基于交换链图像。最后，帧缓冲区直接依赖于交换链图像，因此也必须被重新创建。
+
+为确保在重新创建它们之前清理掉这些对象的旧版本，我们应该将一部分清理代码移到一个单独的函数中，我们可以从recreateSwapChain函数中调用它。我们称它为cleanupSwapChain:
+
+```cpp
+void cleanupSwapChain() {
+
+}
+
+void recreateSwapChain() {
+    vkDeviceWaitIdle(device);
+
+    cleanupSwapChain();
+
+    createSwapChain();
+    createImageViews();
+    createFramebuffers();
+}
+```
+
+请注意，为了简化，我们在此处没有重新创建renderpass。理论上，在应用程序的生命周期中，交换链图像格式可能会发生变化，例如，当将窗口从标准范围移动到高动态范围监视器时。这可能要求应用程序重新创建renderpass，以确保动态范围间的变化得到适当的反映。
+
+我们将把所有作为交换链刷新的一部分重新创建的对象的清理代码从cleanup移动到cleanupSwapChain：
+
+```cpp
+void cleanupSwapChain() {
+    for (size_t i = 0; i < swapChainFramebuffers.size(); i++) {
+        vkDestroyFramebuffer(device, swapChainFramebuffers[i], nullptr);
+    }
+
+    for (size_t i = 0; i < m_SwapChainImageViews.size(); i++) {
+        vkDestroyImageView(device, m_SwapChainImageViews[i], nullptr);
+    }
+
+    vkDestroySwapchainKHR(device, swapChain, nullptr);
+}
+
+void cleanup() {
+    cleanupSwapChain();
+
+    vkDestroyPipeline(device, graphicsPipeline, nullptr);
+    vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+
+    vkDestroyRenderPass(device, renderPass, nullptr);
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+        vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+        vkDestroyFence(device, inFlightFences[i], nullptr);
+    }
+
+    vkDestroyCommandPool(device, commandPool, nullptr);
+
+    vkDestroyDevice(device, nullptr);
+
+    if (enableValidationLayers) {
+        DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
+    }
+
+    vkDestroySurfaceKHR(instance, surface, nullptr);
+    vkDestroyInstance(instance, nullptr);
+
+    glfwDestroyWindow(window);
+
+    glfwTerminate();
+}
+```
+
+注意，在chooseSwapExtent中，我们已经查询过新的窗口分辨率，以确保交换链图像具有（新的）正确尺寸，所以无需修改chooseSwapExtent（记住，我们在创建交换链时，已经必须使用glfwGetFramebufferSize来获取表面的像素分辨率）。
+
+重新创建交换链就这么简单！然而，这种方法的缺点是我们需要在创建新的交换链之前停止所有的渲染。在从旧交换链的一个图像上还在进行绘制命令的同时，是可以创建一个新的交换链的。你需要将旧的交换链传递到VkSwapchainCreateInfoKHR结构的oldSwapChain字段，并在你完成使用后立即销毁旧的交换链。
+
+#### Suboptimal or out-of-date swap chain
+
+现在我们只需要弄明白何时需要重新创建交换链，并调用我们新的recreateSwapChain函数。幸运的是，Vulkan通常会在演示过程中告诉我们交换链不再适用。vkAcquireNextImageKHR和vkQueuePresentKHR函数可以返回以下特殊值来表示这一点。
+
+VK_ERROR_OUT_OF_DATE_KHR: 交换链已经与表面不兼容，不能再用于渲染。通常在窗口调整大小后发生。
+VK_SUBOPTIMAL_KHR: 交换链仍可以成功地呈现到表面，但表面属性已不完全匹配。
+
+```cpp
+VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    recreateSwapChain();
+    return;
+} else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+    throw std::runtime_error("failed to acquire swap chain image!");
+}
+```
+
+如果在尝试获取图像时交换链已过期，那么就无法再对其进行呈现。因此我们应立即重新创建交换链，并在下一个drawFrame调用中再尝试。
+
+你也可以选择在交换链处于次优状态时这么做，但我选择在这种情况下继续进行，因为我们已经获取了一张图像。VK_SUCCESS和VK_SUBOPTIMAL_KHR都被认为是"
+成功"的返回代码。
+
+```cpp
+result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    recreateSwapChain();
+} else if (result != VK_SUCCESS) {
+    throw std::runtime_error("failed to present swap chain image!");
+}
+
+currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+```
+
+vkQueuePresentKHR函数返回具有相同含义的相同值。在这种情况下，我们也会重新创建交换链，即使它是次优的，因为我们想要获得最好的可能结果。
+
+#### Fixing a deadlock
+
+如果我们现在试图运行代码，可能会遇到死锁。调试代码时，我们发现应用程序到达vkWaitForFences但永远不会继续执行。这是因为当vkAcquireNextImageKHR返回VK_ERROR_OUT_OF_DATE_KHR时，我们重新创建了交换链，然后从drawFrame返回。但在这之前，当前帧的围栏已经等待并重置。由于我们立即返回，没有工作被提交执行，围栏永远不会被信号量触发，导致vkWaitForFences永远等待。
+
+幸运的是，有一个简单的修复办法。延迟重置围栏，直到我们确信我们将提交使用它的工作。因此，如果我们提前返回，围栏仍然被信号量触发，并且下次我们使用相同的围栏对象时，vkWaitForFences就不会产生死锁。
+
+drawFrame的开始部分现在应该是这样的：
+
+```cpp
+vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+
+uint32_t imageIndex;
+VkResult result = vkAcquireNextImageKHR(device, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+    recreateSwapChain();
+    return;
+} else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+    throw std::runtime_error("failed to acquire swap chain image!");
+}
+
+// Only reset the fence if we are submitting work
+vkResetFences(device, 1, &inFlightFences[currentFrame]);
+```
+
+#### Handling resizes explicitly
+
+虽然许多驱动和平台会在窗口调整大小后自动触发
+VK_ERROR_OUT_OF_DATE_KHR，但并不能保证总会发生。这就是为什么我们要添加额外的代码来显式处理大小调整。首先增加一个新的成员变量标志窗口大小已经改变：
+
+```c++
+std::vector<VkFence> inFlightFences;
+
+bool framebufferResized = false;
+```
+
+然后修改 `drawFrame` 函数，检查此标志：
+
+```c++
+if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+    framebufferResized = false;
+    recreateSwapChain();
+} else if (result != VK_SUCCESS) {
+    ...
+}
+```
+
+在 `vkQueuePresentKHR` 后进行上述操作非常重要，以确保信号量处于一致状态，否则可能无法正确等待已触发的信号量。现在，我们可以使用
+GLFW 框架中的 `glfwSetFramebufferSizeCallback` 函数设置回调来检测尺寸调整：
+
+```c++
+void initWindow() {
+    glfwInit();
+
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+
+    window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+    glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+}
+
+static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+
+}
+```
+
+之所以创建一个静态函数作为回调，是因为 GLFW 不知道如何将正确的 this 指针作为参数来调用我们的 HelloTriangleApplication
+实例中的成员函数。
+
+然而，我们在回调中获取了对 GLFWwindow 的引用，并且 GLFW 还有另一个函数允许你在其中存储任意指针：`glfwSetWindowUserPointer`：
+
+```c++
+window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+glfwSetWindowUserPointer(window, this);
+glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+```
+
+现在，可以通过 `glfwGetWindowUserPointer` 从回调中取出该值，然后正确设置标志：
+
+```c++
+static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+    auto app = reinterpret_cast<HelloTriangleApplication*>(glfwGetWindowUserPointer(window));
+    app->framebufferResized = true;
+}
+```
+
+现在试着运行程序，调整窗口大小，看看帧缓冲区是否能正确地随窗口一起调整大小。
+
+#### Handling minimization
+
+交换链可能会过时的另一个情况是窗口大小改变的特殊类型：窗口最小化。这个情况特殊的原因在于，它会导致帧缓冲区的大小变为
+0。在本教程中，我们将通过扩展 `recreateSwapChain` 函数来处理，直到窗口再次处于前台：
+
+```c++
+void recreateSwapChain() {
+    int width = 0, height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(window, &width, &height);
+        glfwWaitEvents();
+    }
+
+    vkDeviceWaitIdle(device);
+
+    ...
+}
+```
+
+首次调用 `glfwGetFramebufferSize` 处理了尺寸已经正确，而 `glfwWaitEvents` 则没什么可等待的情况。
+
+恭喜你，你已经完成了你的第一个良好表现的 Vulkan 程序！在接下来的章节中，我们将去掉顶点着色器中的硬编码顶点，真正使用顶点缓冲区。
