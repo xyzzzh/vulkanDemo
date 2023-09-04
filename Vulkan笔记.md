@@ -1822,3 +1822,426 @@ vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 ```
 
 现在，管线已经准备好接受 vertices 容器格式的顶点数据，并将其传递给我们的顶点着色器。如果您现在启用验证层运行程序，您会看到它抱怨没有顶点缓冲区绑定到绑定。下一步是创建一个顶点缓冲区，并将顶点数据移到其中，以便 GPU 能够访问它。
+
+## 2.2 Vertex buffer creation
+
+### 引言
+在Vulkan中，缓冲区是用于存储可以由图形卡读取的任意数据的内存区域。它们可以用来存储顶点数据（我们将在本章中这样做），但也可以用于许多其他目的，我们将在未来的章节中探索。与到目前为止我们一直处理的Vulkan对象不同，缓冲区并不会自动分配内存。前面几章的工作已经表明，Vulkan API将几乎所有事物的控制权交给了程序员，内存管理就是其中之一。
+
+### 缓冲区的创建
+新建一个createVertexBuffer函数，并在initVulkan中createCommandBuffers之前调用它。
+
+```c++
+void initVulkan() {
+    createInstance();
+    setupDebugMessenger();
+    createSurface();
+    pickPhysicalDevice();
+    createLogicalDevice();
+    createSwapChain();
+    createImageViews();
+    createRenderPass();
+    createGraphicsPipeline();
+    createFramebuffers();
+    createCommandPool();
+    createVertexBuffer();
+    createCommandBuffers();
+    createSyncObjects();
+}
+
+...
+
+void createVertexBuffer() {
+
+}
+```
+创建一个缓冲区需要我们填充一个VkBufferCreateInfo结构体。
+
+```c++
+VkBufferCreateInfo bufferInfo{};
+bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+bufferInfo.size = sizeof(vertices[0]) * vertices.size();
+```
+结构体的第一个字段是size，它指定缓冲区的大小（以字节为单位）。使用sizeof计算顶点数据的字节大小很简单。
+
+```c++
+bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+```
+第二个字段是usage，它指定缓冲区中的数据将被用于哪些目的。使用位或可以指定多个用途。我们的用例将是一个顶点缓冲区，我们将在未来的章节中查看其他类型的用途。
+
+```c++
+bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+```
+就像交换链中的图像一样，缓冲区也可以由特定的队列族拥有，或者同时在多个队列族之间共享。缓冲区只从图形队列中使用，所以我们可以坚持使用独占访问模式。
+
+flags参数用于配置稀疏缓存器内存，现在暂时不需要考虑。我们保持默认值0。
+
+现在我们可以用vkCreateBuffer创建缓冲区。定义一个类成员来保存缓冲区句柄，并命名为vertexBuffer。
+
+```c++
+VkBuffer vertexBuffer;
+
+...
+
+void createVertexBuffer() {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = sizeof(vertices[0]) * vertices.size();
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(device, &bufferInfo, nullptr, &vertexBuffer) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create vertex buffer!");
+    }
+}
+```
+缓冲区应该在程序结束之前可用于渲染命令，并且不依赖于交换链，所以我们将在原始的cleanup函数中清理它：
+
+```c++
+void cleanup() {
+    cleanupSwapChain();
+
+    vkDestroyBuffer(device, vertexBuffer, nullptr);
+
+    ...
+}
+```
+
+### 内存需求
+缓冲区已创建，但实际上还没有分配任何内存。为缓冲区分配内存的第一步是使用恰当命名的vkGetBufferMemoryRequirements函数查询其内存需求。
+
+```c++
+VkMemoryRequirements memRequirements;
+vkGetBufferMemoryRequirements(device, vertexBuffer, &memRequirements);
+```
+VkMemoryRequirements结构体有三个字段：
+
+- size：所需内存量的大小（以字节为单位），可能与bufferInfo.size不同。
+- alignment：缓冲区开始的内存区域的偏移量（以字节为单位），取决于bufferInfo.usage和bufferInfo.flags。
+- memoryTypeBits：适合缓冲区的内存类型的位字段。
+
+显卡可以提供不同类型的内存供分配。每种内存类型在允许的操作和性能特性方面都有所不同。我们需要结合缓冲区的要求和我们自己的应用程序要求来找出要使用的正确的内存类型。让我们为此创建一个新的函数findMemoryType。
+
+```c++
+uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) {
+
+}
+```
+首先，我们需要使用vkGetPhysicalDeviceMemoryProperties查询关于可用内存类型的信息。
+
+```c++
+VkPhysicalDeviceMemoryProperties memProperties;
+vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+```
+VkPhysicalDeviceMemoryProperties结构体有两个数组memoryTypes和memoryHeaps。内存堆是像专用VRAM和RAM中的交换空间（当VRAM用完时）这样的独立内存资源。这些堆中存在不同类型的内存。现在，我们只关心内存的类型，而不是它来自哪个堆，但你可以想象这可能会影响性能。
+
+让我们首先找到一个适合缓冲区本身的内存类型：
+
+```c++
+for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+    if (typeFilter & (1 << i)) {
+        return i;
+    }
+}
+
+throw std::runtime_error("failed to find suitable memory type!");
+```
+typeFilter参数将用于指定适合的内存类型的位字段。这意味着我们可以通过简单地遍历它们并检查相应的位是否设置为1来找到适合的内存类型的索引。
+
+然而，我们不仅对适合顶点缓冲区的内存类型感兴趣。我们还需要能够将我们的顶点数据写入那个内存。memoryTypes数组由VkMemoryType结构体组成，它们指定每种内存类型的堆和属性。属性定义了内存的特殊特性，比如能够映射它，这样我们就可以从CPU写入它。这个属性用VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT标示，但我们也需要使用VK_MEMORY_PROPERTY_HOST_COHERENT_BIT属性。我们在映射内存时会看到原因。
+
+现在我们可以修改循环，也检查这个属性的支持：
+
+```c++
+for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+    if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+        return i;
+    }
+}
+```
+我们可能有多个期望的属性，所以我们应该检查位运算AND的结果不仅非零，而且等于期望的属性位字段。如果有一种适合缓冲区的内存类型同时也具有我们需要的所有属性，那么我们返回其索引，否则我们抛出异常。
+
+### 内存分配
+我们现在有了确定正确内存类型的方法，所以我们可以通过填充VkMemoryAllocateInfo结构体实际分配内存。
+
+```c++
+VkMemoryAllocateInfo allocInfo{};
+allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+allocInfo.allocationSize = memRequirements.size;
+allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+```
+现在，内存分配就像指定大小和类型一样简单，这两者都是根据顶点缓冲区的内存需求和期望的属性派生出来的。创建一个类成员来存储内存句柄，并用vkAllocateMemory进行分配。
+
+```c++
+VkBuffer vertexBuffer;
+VkDeviceMemory vertexBufferMemory;
+
+...
+
+if (vkAllocateMemory(device, &allocInfo, nullptr, &vertexBufferMemory) != VK_SUCCESS) {
+    throw std::runtime_error("failed to allocate vertex buffer memory!");
+}
+```
+如果内存分配成功，我们现在可以通过使用 vkBindBufferMemory 将这段内存与缓冲区关联起来：
+
+```cpp
+vkBindBufferMemory(device, vertexBuffer, vertexBufferMemory, 0);
+```
+
+前三个参数的含义是显而易见的，第四个参数是内存区域的偏移量。由于这部分内存专门分配给顶点缓冲区，所以偏移量简单地为 0。如果偏移量非零，则要求它能被 memRequirements.alignment 整除。
+
+当然，就像 C++ 中的动态内存分配一样，某个时候内存应该被释放。绑定到缓冲对象的内存可以在缓冲不再使用后被释放，所以让我们在缓冲被销毁后释放它：
+
+```cpp
+void cleanup() {
+    cleanupSwapChain();
+
+    vkDestroyBuffer(device, vertexBuffer, nullptr);
+    vkFreeMemory(device, vertexBufferMemory, nullptr);
+}
+```
+
+### 填充顶点缓冲
+
+现在是将顶点数据复制到缓冲区的时间了。这需要通过 vkMapMemory 将缓冲区内存映射到 CPU 可访问的内存中完成。
+
+```cpp
+void* data;
+vkMapMemory(device, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+```
+
+这个函数允许我们访问由偏移量和大小定义的指定内存资源的区域。这里的偏移量和大小分别为 0 和 bufferInfo.size。还可以指定特殊值 VK_WHOLE_SIZE 来映射所有的内存。倒数第二个参数可用于指定标志，但在当前的 API 中还没有任何可用的。它必须设为值 0。最后一个参数指定了映射内存的指针的输出。
+
+```cpp
+void* data;
+vkMapMemory(device, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+memcpy(data, vertices.data(), (size_t) bufferInfo.size);
+vkUnmapMemory(device, vertexBufferMemory);
+```
+
+你现在可以简单地将顶点数据 memcpy 到映射的内存中，并使用 vkUnmapMemory 再次对其进行反映射。遗憾的是，驱动程序可能并不会立即将数据复制到缓冲区内存中，例如因为缓存原因。也有可能写入缓冲区的内容在映射的内存中还不可见。处理这个问题有两种方式：
+
+- 使用主机一致的内存堆，用 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT 表示
+- 在写入映射的内存后调用 vkFlushMappedMemoryRanges，在从映射的内存读取前调用 vkInvalidateMappedMemoryRanges
+
+我们选择了第一种方法，这确保了映射的内存始终匹配分配的内存的内容。请记住，这可能导致性能稍差一些，但我们将在下一章看到为什么这并不重要。
+
+刷新内存范围或使用一致的内存堆意味着驱动程序将知道我们对缓冲区的写操作，但这并不意味着它们实际上已经在 GPU 上可见了。数据传输到 GPU 是一个在后台进行的操作，规范告诉我们，它保证在下一次调用 vkQueueSubmit 时完全完成。
+
+### 绑定顶点缓冲
+
+现在剩下的就是在渲染操作期间绑定顶点缓冲。我们将扩展 recordCommandBuffer 函数来做这个。
+
+```cpp
+vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+VkBuffer vertexBuffers[] = {vertexBuffer};
+VkDeviceSize offsets[] = {0};
+vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
+vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+```
+
+vkCmdBindVertexBuffers 函数用于将顶点缓冲器绑定到我们在上一章设置的绑定。除了命令缓冲区，前两个参数指定了我们将为其指定顶点缓冲区的偏移量和绑定数量。最后两个参数指定了要绑定的顶点缓冲区数组以及开始读取顶点数据的字节偏移量。你也应该改变对 vkCmdDraw 的调用，以传递缓冲区中的顶点数量，而不是硬编码的数字 3。
+
+现在运行程序，你应该再次看到熟悉的三角形：
+
+尝试修改 vertices 数组，将顶点的颜色改为白色：
+
+```cpp
+const std::vector<Vertex> vertices = {
+    {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+    {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
+```
+
+再次运行程序，你应该会看到如下图像：
+
+在下一章中，我们将研究一种不同的方法来复制顶点数据到顶点缓冲区，这种方法可以提高性能，但需要做更多的工作。
+
+## 2.3 Staging buffer 
+
+### Introduction
+
+我们现在的顶点缓冲工作得很好，但允许我们从 CPU 访问它的内存类型可能不是图形卡本身读取的最优内存类型。最优的内存有 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT 标志，通常在专用图形卡上不可由 CPU 访问。在这一章节中，我们将创建两个顶点缓冲区。一个是在 CPU 可访问的内存中的暂存缓冡区，用于将数据从顶点数组上传到这里，而另一个是设备本地内存中的最终顶点缓冲区。然后我们将使用一个缓冲区复制命令将数据从暂存缓冲区移动到实际的顶点缓冲区。
+
+### Transfer queue
+
+缓冲区复制命令需要一个支持传输操作的队列家族，这是通过 VK_QUEUE_TRANSFER_BIT 表示的。好消息是，任何具有 VK_QUEUE_GRAPHICS_BIT 或 VK_QUEUE_COMPUTE_BIT 功能的队列家族都已隐式支持 VK_QUEUE_TRANSFER_BIT 操作。在这些情况下，实现不需要在 queueFlags 中显式列出它。
+
+如果你喜欢挑战，那么你可以尝试使用特定的队列家族进行传输操作。这将要求你对程序进行以下修改：
+
+- 修改 QueueFamilyIndices 和 findQueueFamilies，明确查找具有 VK_QUEUE_TRANSFER_BIT 位但没有 VK_QUEUE_GRAPHICS_BIT 的队列家族。
+- 修改 createLogicalDevice，以请求传输队列的句柄
+- 为提交到传输队列家族的命令缓冲创建第二个命令池
+- 将资源的 sharingMode 更改为 VK_SHARING_MODE_CONCURRENT，并指定图形和传输队列家族
+- 将所有传输命令（如我们将在本章中使用的 vkCmdCopyBuffer）提交到传输队列，而不是图形队列
+
+这有点工作，但它会让你了解更多关于队列家族之间如何共享资源的知识。
+
+### Abstracting buffer creation
+
+因为我们将在本章中创建多个缓冲区，所以将缓冲区创建移动到一个辅助函数中是个好主意。创建一个新的名为 createBuffer 的函数，并将 createVertexBuffer 中的代码（除映射外）移动到其中。
+
+```cpp
+void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory) {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+        throw std::runtime_error("failed to create buffer!");
+    }
+
+    VkMemoryRequirements memRequirements;
+    vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size;
+    allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+    if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+        throw std::runtime_error("failed to allocate buffer memory!");
+    }
+
+    vkBindBufferMemory(device, buffer, bufferMemory, 0);
+}
+```
+
+确保添加缓冲区大小、内存属性和使用的参数，这样我们就可以使用此函数来创建许多不同类型的缓冲区。最后两个参数是写入句柄的输出变量。
+
+你现在可以从 createVertexBuffer 中删除缓冲区创建和内存分配的代码，并调用 createBuffer 替代：
+
+```cpp
+void createVertexBuffer() {
+    VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+    createBuffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, vertexBuffer, vertexBufferMemory);
+
+    void* data;
+    vkMapMemory(device, vertexBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, vertices.data(), (size_t) bufferSize);
+    vkUnmapMemory(device, vertexBufferMemory);
+}
+```
+运行你的程序以确保顶点缓冲仍然正常工作。
+
+### Using a staging buffer
+
+我们现在将改变 createVertexBuffer 只作为临时缓冲区使用主机可见的缓冲区，并使用设备本地的缓冲区作为实际的顶点缓冲区。
+
+```cpp
+void createVertexBuffer() {
+    VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingBufferMemory;
+    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+    void* data;
+    vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
+        memcpy(data, vertices.data(), (size_t) bufferSize);
+    vkUnmapMemory(device, stagingBufferMemory);
+
+    createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+}
+```
+
+我们现在使用一个新的带有 stagingBufferMemory 的 stagingBuffer 进行映射和复制顶点数据。在这一章中，我们将使用两个新的缓冲区使用标志：
+
+- VK_BUFFER_USAGE_TRANSFER_SRC_BIT：缓冲区可以用作内存传输操作的源。
+- VK_BUFFER_USAGE_TRANSFER_DST_BIT：缓冲区可以用作内存传输操作的目标。
+
+vertexBuffer 现在从设备本地的内存类型中分配，这通常意味着我们无法使用 vkMapMemory。但是，我们可以从 stagingBuffer 复制数据到 vertexBuffer。我们必须通过为 stagingBuffer 指定转移源标志，以及为 vertexBuffer 指定转移目标标志和顶点缓冲区使用标志，来表明我们打算这样做。
+
+我们现在将编写一个函数，将一个缓冲区的内容复制到另一个缓冲区，称为 copyBuffer。
+
+```cpp
+void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+
+}
+```
+
+内存传输操作是使用命令缓冲执行的，就像绘图命令一样。因此，我们首先必须分配一个临时命令缓冲。你可能希望为这种短寿命的缓冲区创建一个单独的命令池，因为实现可能可以应用内存分配优化。在这种情况下，你应该在生成命令池时使用 VK_COMMAND_POOL_CREATE_TRANSIENT_BIT 标志。
+
+```cpp
+void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = commandPool;
+    allocInfo.commandBufferCount = 1;
+
+    VkCommandBuffer commandBuffer;
+    vkAllocateCommandBuffers(device, &allocInfo, &commandBuffer);
+}
+```
+并立即开始记录命令缓冲：
+
+```cpp
+VkCommandBufferBeginInfo beginInfo{};
+beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+vkBeginCommandBuffer(commandBuffer, &beginInfo);
+```
+我们只使用一次命令缓冲区，并等待从函数返回直到复制操作完成执行。使用 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT 告诉驱动我们的意图是个好习惯。
+
+```cpp
+VkBufferCopy copyRegion{};
+copyRegion.srcOffset = 0; // Optional
+copyRegion.dstOffset = 0; // Optional
+copyRegion.size = size;
+vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+```
+通过 `vkCmdCopyBuffer` 命令传输缓冲区的内容。它接受源和目标缓冲区作为参数，以及要复制的区域数组。这些区域在 `VkBufferCopy` 结构体中定义，包括源缓冲区偏移量、目标缓冲区偏移量和大小。这里无法指定 `VK_WHOLE_SIZE`，与 `vkMapMemory` 命令不同。
+
+```c
+vkEndCommandBuffer(commandBuffer);
+```
+这个命令缓冲区只包含复制命令，所以我们可以在此之后停止记录。现在执行命令缓冲区以完成传输：
+
+```c
+VkSubmitInfo submitInfo{};
+submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+submitInfo.commandBufferCount = 1;
+submitInfo.pCommandBuffers = &commandBuffer;
+
+vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+vkQueueWaitIdle(graphicsQueue);
+```
+与绘制命令不同，这次我们不需要等待任何事件。我们只想立即在缓冲区上执行传输。有两种可能的方式来等待这个传输完成。我们可以使用栅栏并用 `vkWaitForFences` 等待，或者简单地等待传输队列变为空闲状态 `vkQueueWaitIdle`。使用栅栏将允许你同时调度多个传输并等待它们全部完成，而不是一次执行一个。这可能会给驱动程序更多的优化机会。
+
+```c
+vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+```
+别忘了清理用于传输操作的命令缓冲区。
+
+现在我们可以从 `createVertexBuffer` 函数调用 `copyBuffer`，将顶点数据移动到设备本地缓冲区：
+
+```c
+createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+
+copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+```
+从暂存缓冲区复制数据到设备缓冲区后，我们应该清理它：
+
+```c
+...
+
+copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+
+vkDestroyBuffer(device, stagingBuffer, nullptr);
+vkFreeMemory(device, stagingBufferMemory, nullptr);
+```
+
+运行你的程序，验证你是否再次看到熟悉的三角形。改进可能现在还不明显，但是它的顶点数据现在正在从高性能内存加载。当我们开始渲染更复杂的几何图形时，这将很重要。
+
+### Conclusion
+
+应该注意，在实际应用中，你不应该为每个单独的缓冲区实际调用 `vkAllocateMemory`。同时进行的内存分配的最大数量受物理设备限制 `maxMemoryAllocationCount` 的限制，即使在像 NVIDIA GTX 1080 这样的高端硬件上，也可能低至 4096。为大量对象同时分配内存的正确方法是创建一个自定义分配器，通过使用我们在许多功能中看到的偏移参数，将单个分配在许多不同的对象之间进行切割。
+
+你可以自己实现这样一个分配器，或者使用 GPUOpen 初始化提供的 VulkanMemoryAllocator 库。然而，对于本教程，为每个资源使用单独的分配是可以的，因为我们暂时不会接近碰到这些限制。

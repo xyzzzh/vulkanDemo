@@ -189,6 +189,10 @@ class HelloTriangleApplication {
 
 	bool framebufferResized = false;
 
+	// vertex buffer
+	VkBuffer m_VertexBuffer;
+	VkDeviceMemory m_VertexBufferMemory;
+
 	void initWindow() {
 		// 初始化GLFW库
 		glfwInit();
@@ -213,6 +217,7 @@ class HelloTriangleApplication {
 		createGraphicsPipeline();
 		createFramebuffers();
 		createCommandPool();
+		createVertexBuffer();
 		createCommandBuffers();
 		createSyncObjects();
 	}
@@ -228,6 +233,9 @@ class HelloTriangleApplication {
 
 	void cleanUp() {
 		cleanupSwapChain();
+
+		vkDestroyBuffer(m_Device, m_VertexBuffer, nullptr);
+		vkFreeMemory(m_Device, m_VertexBufferMemory, nullptr);
 
 		vkDestroyPipeline(m_Device, m_GraphicsPipeline, nullptr);
 		vkDestroyPipelineLayout(m_Device, m_PipelineLayout, nullptr);
@@ -529,6 +537,7 @@ class HelloTriangleApplication {
 		createInfo.pfnUserCallback =
 		    debugCallback; // 设置用户自定义的回调函数，一旦满足上述条件，该回调函数就会被触发。
 	}
+
 	// Queue Family
 	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) {
 		// 创建一个QueueFamilyIndices结构体，用于存储找到的队列家族索引
@@ -696,6 +705,7 @@ class HelloTriangleApplication {
 		}
 		return availableFormats[0];
 	}
+
 	// [2].2 Present Mode
 	// 交换链的呈现模式可以说是最重要的设置，因为它代表了将图像显示到屏幕的实际条件。在Vulkan中有四种可能的模式:
 	// -VK_PRESENT_MODE_IMMEDIATE_KHR：你的应用程序提交的图像会立即被传输到屏幕上，这可能会导致撕裂。
@@ -1195,7 +1205,12 @@ class HelloTriangleApplication {
 		scissor.extent = swapChainExtent;
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+		VkBuffer vertexBuffers[] = {m_VertexBuffer};
+		VkDeviceSize offsets[] = {0};
+		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
+		vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0,
+		          0);
 
 		vkCmdEndRenderPass(commandBuffer);
 		if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
@@ -1343,6 +1358,61 @@ class HelloTriangleApplication {
 		auto app = reinterpret_cast<HelloTriangleApplication *>(
 		    glfwGetWindowUserPointer(window));
 		app->framebufferResized = true;
+	}
+
+	// vertex buffer creation
+	void createVertexBuffer() {
+		VkBufferCreateInfo bufferInfo{};
+		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferInfo.size = sizeof(vertices[0]) * vertices.size();
+		bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		if (vkCreateBuffer(m_Device, &bufferInfo, nullptr, &m_VertexBuffer) !=
+		    VK_SUCCESS) {
+			throw std::runtime_error("Failed to create vertex buffer!");
+		}
+
+		VkMemoryRequirements memRequirements;
+		vkGetBufferMemoryRequirements(m_Device, m_VertexBuffer,
+		                              &memRequirements);
+
+		VkMemoryAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memRequirements.size;
+		allocInfo.memoryTypeIndex =
+		    findMemoryType(memRequirements.memoryTypeBits,
+		                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+		                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+		if (vkAllocateMemory(m_Device, &allocInfo, nullptr,
+		                     &m_VertexBufferMemory) != VK_SUCCESS) {
+			throw std::runtime_error(
+			    "Failed to allocate vertex buffer memory!");
+		}
+
+		vkBindBufferMemory(m_Device, m_VertexBuffer, m_VertexBufferMemory, 0);
+
+		void *data;
+		vkMapMemory(m_Device, m_VertexBufferMemory, 0, bufferInfo.size, 0,
+		            &data);
+		memcpy(data, vertices.data(), (size_t)bufferInfo.size);
+		vkUnmapMemory(m_Device, m_VertexBufferMemory);
+	}
+
+	uint32_t findMemoryType(uint32_t typeFilter,
+	                        VkMemoryPropertyFlags properties) {
+		VkPhysicalDeviceMemoryProperties memProperties;
+		vkGetPhysicalDeviceMemoryProperties(m_PhysicalDevice, &memProperties);
+
+		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+			if ((typeFilter & (1 << i)) &&
+			    (memProperties.memoryTypes[i].propertyFlags & properties) ==
+			        properties) {
+				return i;
+			}
+		}
+		throw std::runtime_error("Failed to find suitable memory type!");
 	}
 };
 
